@@ -1,0 +1,22 @@
+[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+#runner = "probe-rs run --chip RP235x"
+#runner = "elf2uf2-rs -d"
+runner = "picotool load -u -v -x -t elf"
+
+# Default target for embedded builds (only for binaries)
+# NOTE: For tests, explicitly use: cargo test --target aarch64-apple-darwin
+[build]
+# Comment this out to allow tests to run on host
+# Uncomment only when building for RP2040
+# target = "thumbv8m.main-none-eabihf"
+
+[env]
+DEFMT_LOG = "debug"
+
+[alias]
+# Custom aliases for common commands
+test-host = "test --lib --target aarch64-apple-darwin"
+test-host-release = "test --lib --release --target aarch64-apple-darwin"
+build-rp2040 = "build --bin knx-rs --features embassy-rp --target thumbv8m.main-none-eabihf"
+check-rp2040 = "check --bin knx-rs --features embassy-rp --target thumbv8m.main-none-eabihf"
+flash-rp2040 = "build --bin knx-rs --features embassy-rp --target thumbv8m.main-none-eabihf --release"
