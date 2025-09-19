@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use cyw43::{Control};
+use cyw43::Control;
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::*;
 use defmt_rtt as _;
@@ -23,7 +23,9 @@ use static_cell::StaticCell;
 #[used]
 pub static PICOTOOL_ENTRIES: [embassy_rp::binary_info::EntryAddr; 4] = [
     embassy_rp::binary_info::rp_program_name!(c"KNX-RS"),
-    embassy_rp::binary_info::rp_program_description!(c"KNX protocol implementation for Raspberry Pico 2 W"),
+    embassy_rp::binary_info::rp_program_description!(
+        c"KNX protocol implementation for Raspberry Pico 2 W"
+    ),
     embassy_rp::binary_info::rp_cargo_version!(),
     embassy_rp::binary_info::rp_program_build_attribute!(),
 ];
@@ -90,9 +92,9 @@ async fn main(spawner: Spawner) {
     let seed: u64 = RoscRng.next_u64();
     info!("Random seed: {}", seed);
 
-
     let shared_control = SharedControl(&*{
-        static CONTROL: StaticCell<Mutex<CriticalSectionRawMutex, Control<'static>>> = StaticCell::new();
+        static CONTROL: StaticCell<Mutex<CriticalSectionRawMutex, Control<'static>>> =
+            StaticCell::new();
         CONTROL.init(Mutex::new(control))
     });
 

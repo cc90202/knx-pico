@@ -25,7 +25,7 @@ const fn unlikely(b: bool) -> bool {
 
 /// Compiler hint for likely branches (success paths)
 #[inline(always)]
-#[allow(dead_code)]  // Reserved for future optimizations
+#[allow(dead_code)] // Reserved for future optimizations
 const fn likely(b: bool) -> bool {
     !unlikely(!b)
 }
@@ -96,14 +96,12 @@ impl KnxnetIpHeader {
         let protocol_version = unsafe { *data.get_unchecked(1) };
 
         // Load as u16 in one operation (compiler will optimize to single load)
-        let service_type_raw = u16::from_be_bytes([
-            unsafe { *data.get_unchecked(2) },
-            unsafe { *data.get_unchecked(3) },
-        ]);
-        let total_length = u16::from_be_bytes([
-            unsafe { *data.get_unchecked(4) },
-            unsafe { *data.get_unchecked(5) },
-        ]);
+        let service_type_raw = u16::from_be_bytes([unsafe { *data.get_unchecked(2) }, unsafe {
+            *data.get_unchecked(3)
+        }]);
+        let total_length = u16::from_be_bytes([unsafe { *data.get_unchecked(4) }, unsafe {
+            *data.get_unchecked(5)
+        }]);
 
         // Fast validation: combine checks with bitwise operations when possible
         // Most frames are valid, so mark error path as unlikely
@@ -115,8 +113,8 @@ impl KnxnetIpHeader {
             return Err(KnxError::UnsupportedVersion);
         }
 
-        let service_type = ServiceType::from_u16(service_type_raw)
-            .ok_or(KnxError::UnsupportedServiceType)?;
+        let service_type =
+            ServiceType::from_u16(service_type_raw).ok_or(KnxError::UnsupportedServiceType)?;
 
         Ok(Self {
             header_length,

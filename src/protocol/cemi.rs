@@ -290,7 +290,7 @@ impl Apci {
     pub const fn from_bytes(byte1: u8, byte2: u8) -> Self {
         // Extract APCI: byte1[1:0] << 8 | byte2[7:6] << 6
         // We mask byte2 to get only the command bits (7-6), ignoring data bits (5-0)
-        let apci = ((byte1 as u16 & 0x03) << 8) | ((byte2 as u16 & 0xC0));
+        let apci = ((byte1 as u16 & 0x03) << 8) | (byte2 as u16 & 0xC0);
 
         match apci {
             0x000 => Self::GroupValueRead,
@@ -479,8 +479,7 @@ impl<'a> CEMIFrame<'a> {
             return Err(KnxError::BufferTooSmall);
         }
 
-        let message_code = CEMIMessageCode::from_u8(data[0])
-            .ok_or(KnxError::InvalidMessageCode)?;
+        let message_code = CEMIMessageCode::from_u8(data[0]).ok_or(KnxError::InvalidMessageCode)?;
 
         Ok(Self { message_code, data })
     }
