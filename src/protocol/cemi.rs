@@ -66,43 +66,59 @@ pub struct ControlField1 {
     raw: u8,
 }
 
-impl ControlField1 {
-    /// Create from raw byte
-    pub const fn from_raw(raw: u8) -> Self {
+impl From<u8> for ControlField1 {
+    #[inline(always)]
+    fn from(raw: u8) -> Self {
         Self { raw }
     }
+}
 
+impl From<ControlField1> for u8 {
+    #[inline(always)]
+    fn from(ctrl: ControlField1) -> u8 {
+        ctrl.raw
+    }
+}
+
+impl ControlField1 {
     /// Get raw byte value
-    pub const fn to_raw(self) -> u8 {
+    #[inline(always)]
+    pub const fn raw(self) -> u8 {
         self.raw
     }
 
     /// Check if frame is standard (true) or extended (false)
+    #[inline(always)]
     pub const fn is_standard_frame(self) -> bool {
         (self.raw & 0x80) != 0
     }
 
     /// Check if repeat flag is set (do not repeat if true)
+    #[inline(always)]
     pub const fn do_not_repeat(self) -> bool {
         (self.raw & 0x20) != 0
     }
 
     /// Check if this is a system broadcast
+    #[inline(always)]
     pub const fn is_broadcast(self) -> bool {
         (self.raw & 0x10) != 0
     }
 
     /// Get priority
+    #[inline(always)]
     pub const fn priority(self) -> Priority {
         Priority::from_u8((self.raw >> 2) & 0x03)
     }
 
     /// Check if acknowledge is requested
+    #[inline(always)]
     pub const fn ack_requested(self) -> bool {
         (self.raw & 0x02) != 0
     }
 
     /// Check if confirm error flag is set
+    #[inline(always)]
     pub const fn has_error(self) -> bool {
         (self.raw & 0x01) != 0
     }
@@ -140,9 +156,17 @@ impl ControlField1 {
 }
 
 impl Default for ControlField1 {
+    #[inline]
     fn default() -> Self {
         // Standard frame, repeat allowed, broadcast, normal priority, no ack, no error
-        Self::new(true, false, true, Priority::Normal, false, false)
+        // Pre-calculated: 0b10010100 = 0x94
+        // Bit 7: 1 = standard frame
+        // Bit 5: 0 = repeat allowed
+        // Bit 4: 1 = broadcast
+        // Bits 3-2: 01 = normal priority
+        // Bit 1: 0 = no ack
+        // Bit 0: 0 = no error
+        Self { raw: 0x94 }
     }
 }
 
@@ -159,28 +183,41 @@ pub struct ControlField2 {
     raw: u8,
 }
 
-impl ControlField2 {
-    /// Create from raw byte
-    pub const fn from_raw(raw: u8) -> Self {
+impl From<u8> for ControlField2 {
+    #[inline(always)]
+    fn from(raw: u8) -> Self {
         Self { raw }
     }
+}
 
+impl From<ControlField2> for u8 {
+    #[inline(always)]
+    fn from(ctrl: ControlField2) -> u8 {
+        ctrl.raw
+    }
+}
+
+impl ControlField2 {
     /// Get raw byte value
-    pub const fn to_raw(self) -> u8 {
+    #[inline(always)]
+    pub const fn raw(self) -> u8 {
         self.raw
     }
 
     /// Check if destination is group address (true) or individual (false)
+    #[inline(always)]
     pub const fn is_group_address(self) -> bool {
         (self.raw & 0x80) != 0
     }
 
     /// Get hop count (0-7)
+    #[inline(always)]
     pub const fn hop_count(self) -> u8 {
         (self.raw >> 4) & 0x07
     }
 
     /// Get extended frame format
+    #[inline(always)]
     pub const fn extended_format(self) -> u8 {
         self.raw & 0x0F
     }
@@ -200,9 +237,14 @@ impl ControlField2 {
 }
 
 impl Default for ControlField2 {
+    #[inline]
     fn default() -> Self {
         // Group address, hop count 6, standard format
-        Self::new(true, 6, 0)
+        // Pre-calculated: 0b11100000 = 0xE0
+        // Bit 7: 1 = group address
+        // Bits 6-4: 110 = hop count 6
+        // Bits 3-0: 0000 = standard format
+        Self { raw: 0xE0 }
     }
 }
 
@@ -372,9 +414,9 @@ impl<'a> LDataFrame<'a> {
             return Err(KnxError::BufferTooSmall);
         }
 
-        let ctrl1 = ControlField1::from_raw(data[0]);
-        let ctrl2 = ControlField2::from_raw(data[1]);
-        let source = IndividualAddress::from_raw(u16::from_be_bytes([data[2], data[3]]));
+        let ctrl1 = ControlField1::from(data[0]);
+        let ctrl2 = ControlField2::from(data[1]);
+        let source = IndividualAddress::from(u16::from_be_bytes([data[2], data[3]]));
         let destination_raw = u16::from_be_bytes([data[4], data[5]]);
         let npdu_length = data[6];
 
@@ -384,10 +426,8 @@ impl<'a> LDataFrame<'a> {
 
         // For data frames, parse APCI
         let (apci, data_start) = if tpci.is_data() {
-            if data.len() < 9 {
-                return Err(KnxError::InvalidFrame);
-            }
-            let apci = Apci::from_bytes(tpci_byte, data[8]);
+            // SAFETY: We already checked data.len() >= MIN_SIZE (9) at line 385
+            let apci = Apci::from_bytes(tpci_byte, unsafe { *data.get_unchecked(8) });
             (apci, 9)
         } else {
             (Apci::Unknown(0), 8)
@@ -420,34 +460,39 @@ impl<'a> LDataFrame<'a> {
     }
 
     /// Get destination as group address (if applicable)
+    #[inline]
     pub fn destination_group(&self) -> Option<GroupAddress> {
         if self.ctrl2.is_group_address() {
-            Some(GroupAddress::from_raw(self.destination_raw))
+            Some(GroupAddress::from(self.destination_raw))
         } else {
             None
         }
     }
 
     /// Get destination as individual address (if applicable)
+    #[inline]
     pub fn destination_individual(&self) -> Option<IndividualAddress> {
         if !self.ctrl2.is_group_address() {
-            Some(IndividualAddress::from_raw(self.destination_raw))
+            Some(IndividualAddress::from(self.destination_raw))
         } else {
             None
         }
     }
 
     /// Check if this is a group value write
+    #[inline(always)]
     pub const fn is_group_write(&self) -> bool {
         matches!(self.apci, Apci::GroupValueWrite)
     }
 
     /// Check if this is a group value read
+    #[inline(always)]
     pub const fn is_group_read(&self) -> bool {
         matches!(self.apci, Apci::GroupValueRead)
     }
 
     /// Check if this is a group value response
+    #[inline(always)]
     pub const fn is_group_response(&self) -> bool {
         matches!(self.apci, Apci::GroupValueResponse)
     }
@@ -485,21 +530,22 @@ impl<'a> CEMIFrame<'a> {
     }
 
     /// Get the message code
+    #[inline(always)]
     pub const fn message_code(&self) -> CEMIMessageCode {
         self.message_code
     }
 
     /// Get additional info length
+    #[inline(always)]
     pub fn additional_info_length(&self) -> u8 {
-        if self.data.len() < 2 {
-            return 0;
-        }
-        self.data[1]
+        // SAFETY: parse() guarantees data.len() >= MIN_SIZE (2)
+        unsafe { *self.data.get_unchecked(1) }
     }
 
     /// Get the service information (skipping message code and additional info)
     ///
     /// This returns the L_Data payload for data frames.
+    #[inline]
     pub fn service_info(&self) -> Result<&[u8]> {
         let add_info_len = self.additional_info_length();
         let service_start = 2 + add_info_len as usize;
@@ -567,6 +613,20 @@ mod tests {
     }
 
     #[test]
+    fn test_control_field1_default() {
+        let ctrl = ControlField1::default();
+        // Verify pre-calculated value is correct
+        assert_eq!(ctrl.raw(), 0x94);
+        // Verify semantics
+        assert!(ctrl.is_standard_frame());
+        assert!(!ctrl.do_not_repeat());
+        assert!(ctrl.is_broadcast());
+        assert_eq!(ctrl.priority(), Priority::Normal);
+        assert!(!ctrl.ack_requested());
+        assert!(!ctrl.has_error());
+    }
+
+    #[test]
     fn test_control_field1_raw() {
         // 0xBC = 0b10111100
         // Bit 7: 1 = standard frame
@@ -576,7 +636,7 @@ mod tests {
         // Bit 3-2: 11 = low priority
         // Bit 1: 0 = no ack
         // Bit 0: 0 = no error
-        let ctrl = ControlField1::from_raw(0xBC);
+        let ctrl = ControlField1::from(0xBCu8);
         assert!(ctrl.is_standard_frame());
         assert!(ctrl.do_not_repeat()); // Bit 5 is set
         assert!(ctrl.is_broadcast());
@@ -588,6 +648,17 @@ mod tests {
     #[test]
     fn test_control_field2() {
         let ctrl = ControlField2::new(true, 6, 0);
+        assert!(ctrl.is_group_address());
+        assert_eq!(ctrl.hop_count(), 6);
+        assert_eq!(ctrl.extended_format(), 0);
+    }
+
+    #[test]
+    fn test_control_field2_default() {
+        let ctrl = ControlField2::default();
+        // Verify pre-calculated value is correct
+        assert_eq!(ctrl.raw(), 0xE0);
+        // Verify semantics
         assert!(ctrl.is_group_address());
         assert_eq!(ctrl.hop_count(), 6);
         assert_eq!(ctrl.extended_format(), 0);

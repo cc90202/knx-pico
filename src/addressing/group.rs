@@ -13,16 +13,6 @@
 use crate::error::{KnxError, Result};
 use core::fmt;
 
-/// KNX Group Address format
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum AddressFormat {
-    /// 3-level format: Main/Middle/Sub (e.g., 1/2/3)
-    ThreeLevel,
-    /// 2-level format: Main/Sub (e.g., 1/234)
-    TwoLevel,
-}
-
 /// KNX Group Address
 ///
 /// Used for logical grouping of devices and functions.
@@ -41,14 +31,14 @@ pub enum AddressFormat {
 /// assert_eq!(addr.to_string_2level(), "1/234");
 ///
 /// // Create from raw u16
-/// let addr = GroupAddress::from_raw(0x0A03);
+/// let addr = GroupAddress::from(0x0A03u16);
 /// assert_eq!(addr.main(), 1);
 /// assert_eq!(addr.middle(), 2);
 /// assert_eq!(addr.sub(), 3);
 ///
 /// // Parse from string (auto-detects format)
 /// let addr: GroupAddress = "1/2/3".parse().unwrap();
-/// assert_eq!(addr.to_raw(), 0x0A03);
+/// assert_eq!(u16::from(addr), 0x0A03);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -112,36 +102,32 @@ impl GroupAddress {
         Ok(Self { raw })
     }
 
-    /// Create a Group Address from raw u16 value.
-    ///
-    /// # Arguments
-    ///
-    /// * `raw` - Raw 16-bit address value
-    pub const fn from_raw(raw: u16) -> Self {
-        Self { raw }
-    }
-
     /// Get the raw u16 representation of the address.
-    pub const fn to_raw(self) -> u16 {
+    #[inline(always)]
+    pub const fn raw(self) -> u16 {
         self.raw
     }
 
     /// Get the main group component (0-31).
+    #[inline(always)]
     pub const fn main(self) -> u8 {
         ((self.raw >> 11) & 0x1F) as u8
     }
 
     /// Get the middle group component for 3-level format (0-7).
+    #[inline(always)]
     pub const fn middle(self) -> u8 {
         ((self.raw >> 8) & 0x07) as u8
     }
 
     /// Get the sub group component for 3-level format (0-255).
+    #[inline(always)]
     pub const fn sub(self) -> u8 {
         (self.raw & 0xFF) as u8
     }
 
     /// Get the sub group component for 2-level format (0-2047).
+    #[inline(always)]
     pub const fn sub_2level(self) -> u16 {
         self.raw & 0x07FF
     }
@@ -171,6 +157,7 @@ impl GroupAddress {
     /// # Errors
     ///
     /// Returns `KnxError::BufferTooSmall` if buffer is too small.
+    #[inline]
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 2 {
             return Err(KnxError::BufferTooSmall);
@@ -188,12 +175,27 @@ impl GroupAddress {
     /// # Errors
     ///
     /// Returns `KnxError::BufferTooSmall` if buffer is too small.
+    #[inline]
     pub fn decode(buf: &[u8]) -> Result<Self> {
         if buf.len() < 2 {
             return Err(KnxError::BufferTooSmall);
         }
         let raw = u16::from_be_bytes([buf[0], buf[1]]);
         Ok(Self { raw })
+    }
+}
+
+impl From<u16> for GroupAddress {
+    #[inline(always)]
+    fn from(raw: u16) -> Self {
+        Self { raw }
+    }
+}
+
+impl From<GroupAddress> for u16 {
+    #[inline(always)]
+    fn from(addr: GroupAddress) -> u16 {
+        addr.raw
     }
 }
 
@@ -208,33 +210,50 @@ impl core::str::FromStr for GroupAddress {
     type Err = KnxError;
 
     fn from_str(s: &str) -> Result<Self> {
-        let parts: heapless::Vec<&str, 3> = s.split('/').collect();
+        // Zero-allocation parsing using iterators
+        let mut parts = s.split('/');
 
-        match parts.len() {
-            // 3-level format: Main/Middle/Sub
-            3 => {
-                let main = parts[0]
+        let main = parts
+            .next()
+            .and_then(|s| s.parse::<u8>().ok())
+            .ok_or(KnxError::InvalidGroupAddress)?;
+
+        let middle = parts
+            .next()
+            .and_then(|s| s.parse::<u16>().ok())
+            .ok_or(KnxError::InvalidGroupAddress)?;
+
+        // Check if there's a third part (3-level format)
+        match parts.next() {
+            Some(sub_str) => {
+                // 3-level format: Main/Middle/Sub
+                let sub = sub_str
                     .parse::<u8>()
-                    .map_err(|_| KnxError::InvalidGroupAddress)?;
-                let middle = parts[1]
-                    .parse::<u8>()
-                    .map_err(|_| KnxError::InvalidGroupAddress)?;
-                let sub = parts[2]
-                    .parse::<u8>()
-                    .map_err(|_| KnxError::InvalidGroupAddress)?;
-                Self::new(main, middle, sub)
+                    .ok()
+                    .ok_or(KnxError::InvalidGroupAddress)?;
+
+                // Ensure no extra parts
+                if parts.next().is_some() {
+                    return Err(KnxError::InvalidGroupAddress);
+                }
+
+                // middle is actually middle (u8), not sub (u16)
+                if middle > 255 {
+                    return Err(KnxError::InvalidGroupAddress);
+                }
+
+                Self::new(main, middle as u8, sub)
             }
-            // 2-level format: Main/Sub
-            2 => {
-                let main = parts[0]
-                    .parse::<u8>()
-                    .map_err(|_| KnxError::InvalidGroupAddress)?;
-                let sub = parts[1]
-                    .parse::<u16>()
-                    .map_err(|_| KnxError::InvalidGroupAddress)?;
-                Self::new_2level(main, sub)
+            None => {
+                // 2-level format: Main/Sub
+                // middle is actually the sub value
+                // Ensure no extra parts
+                if parts.next().is_some() {
+                    return Err(KnxError::InvalidGroupAddress);
+                }
+
+                Self::new_2level(main, middle)
             }
-            _ => Err(KnxError::InvalidGroupAddress),
         }
     }
 }
@@ -279,7 +298,7 @@ mod tests {
     #[test]
     fn test_from_raw() {
         // 1/2/3 = 0b00001_010_00000011 = 0x0A03
-        let addr = GroupAddress::from_raw(0x0A03);
+        let addr = GroupAddress::from(0x0A03u16);
         assert_eq!(addr.main(), 1);
         assert_eq!(addr.middle(), 2);
         assert_eq!(addr.sub(), 3);
@@ -288,7 +307,7 @@ mod tests {
     #[test]
     fn test_to_raw() {
         let addr = GroupAddress::new(1, 2, 3).unwrap();
-        assert_eq!(addr.to_raw(), 0x0A03);
+        assert_eq!(u16::from(addr), 0x0A03);
     }
 
     #[test]
@@ -329,10 +348,28 @@ mod tests {
 
     #[test]
     fn test_from_str_invalid() {
+        // Too few parts
         let result = "1".parse::<GroupAddress>();
         assert!(result.is_err());
 
+        // Out of range (main)
         let result = "32/0/0".parse::<GroupAddress>();
+        assert!(result.is_err());
+
+        // Too many parts
+        let result = "1/2/3/4".parse::<GroupAddress>();
+        assert!(result.is_err());
+
+        // Non-numeric
+        let result = "a/b/c".parse::<GroupAddress>();
+        assert!(result.is_err());
+
+        // Empty
+        let result = "".parse::<GroupAddress>();
+        assert!(result.is_err());
+
+        // Out of range (2-level sub)
+        let result = "1/2048".parse::<GroupAddress>();
         assert!(result.is_err());
     }
 }

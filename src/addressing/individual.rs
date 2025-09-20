@@ -23,14 +23,14 @@ use core::fmt;
 /// assert_eq!(addr.to_string(), "1.1.5");
 ///
 /// // Create from raw u16
-/// let addr = IndividualAddress::from_raw(0x1105);
+/// let addr = IndividualAddress::from(0x1105u16);
 /// assert_eq!(addr.area(), 1);
 /// assert_eq!(addr.line(), 1);
 /// assert_eq!(addr.device(), 5);
 ///
 /// // Parse from string
 /// let addr: IndividualAddress = "1.1.5".parse().unwrap();
-/// assert_eq!(addr.to_raw(), 0x1105);
+/// assert_eq!(u16::from(addr), 0x1105);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -70,31 +70,26 @@ impl IndividualAddress {
         Ok(Self { raw })
     }
 
-    /// Create an Individual Address from raw u16 value.
-    ///
-    /// # Arguments
-    ///
-    /// * `raw` - Raw 16-bit address value
-    pub const fn from_raw(raw: u16) -> Self {
-        Self { raw }
-    }
-
     /// Get the raw u16 representation of the address.
-    pub const fn to_raw(self) -> u16 {
+    #[inline(always)]
+    pub const fn raw(self) -> u16 {
         self.raw
     }
 
     /// Get the area component (0-15).
+    #[inline(always)]
     pub const fn area(self) -> u8 {
         ((self.raw >> 12) & 0x0F) as u8
     }
 
     /// Get the line component (0-15).
+    #[inline(always)]
     pub const fn line(self) -> u8 {
         ((self.raw >> 8) & 0x0F) as u8
     }
 
     /// Get the device component (0-255).
+    #[inline(always)]
     pub const fn device(self) -> u8 {
         (self.raw & 0xFF) as u8
     }
@@ -108,6 +103,7 @@ impl IndividualAddress {
     /// # Errors
     ///
     /// Returns `KnxError::BufferTooSmall` if buffer is too small.
+    #[inline]
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 2 {
             return Err(KnxError::BufferTooSmall);
@@ -125,6 +121,7 @@ impl IndividualAddress {
     /// # Errors
     ///
     /// Returns `KnxError::BufferTooSmall` if buffer is too small.
+    #[inline]
     pub fn decode(buf: &[u8]) -> Result<Self> {
         if buf.len() < 2 {
             return Err(KnxError::BufferTooSmall);
@@ -140,24 +137,46 @@ impl fmt::Display for IndividualAddress {
     }
 }
 
+impl From<u16> for IndividualAddress {
+    #[inline(always)]
+    fn from(raw: u16) -> Self {
+        Self { raw }
+    }
+}
+
+impl From<IndividualAddress> for u16 {
+    #[inline(always)]
+    fn from(addr: IndividualAddress) -> u16 {
+        addr.raw
+    }
+}
+
 impl core::str::FromStr for IndividualAddress {
     type Err = KnxError;
 
     fn from_str(s: &str) -> Result<Self> {
-        let parts: heapless::Vec<&str, 3> = s.split('.').collect();
-        if parts.len() != 3 {
+        // Zero-allocation parsing using iterators
+        let mut parts = s.split('.');
+
+        let area = parts
+            .next()
+            .and_then(|s| s.parse::<u8>().ok())
+            .ok_or(KnxError::InvalidIndividualAddress)?;
+
+        let line = parts
+            .next()
+            .and_then(|s| s.parse::<u8>().ok())
+            .ok_or(KnxError::InvalidIndividualAddress)?;
+
+        let device = parts
+            .next()
+            .and_then(|s| s.parse::<u8>().ok())
+            .ok_or(KnxError::InvalidIndividualAddress)?;
+
+        // Ensure no extra parts
+        if parts.next().is_some() {
             return Err(KnxError::InvalidIndividualAddress);
         }
-
-        let area = parts[0]
-            .parse::<u8>()
-            .map_err(|_| KnxError::InvalidIndividualAddress)?;
-        let line = parts[1]
-            .parse::<u8>()
-            .map_err(|_| KnxError::InvalidIndividualAddress)?;
-        let device = parts[2]
-            .parse::<u8>()
-            .map_err(|_| KnxError::InvalidIndividualAddress)?;
 
         Self::new(area, line, device)
     }
@@ -189,7 +208,7 @@ mod tests {
 
     #[test]
     fn test_from_raw() {
-        let addr = IndividualAddress::from_raw(0x1203);
+        let addr = IndividualAddress::from(0x1203u16);
         assert_eq!(addr.area(), 1);
         assert_eq!(addr.line(), 2);
         assert_eq!(addr.device(), 3);
@@ -198,7 +217,7 @@ mod tests {
     #[test]
     fn test_to_raw() {
         let addr = IndividualAddress::new(1, 2, 3).unwrap();
-        assert_eq!(addr.to_raw(), 0x1203);
+        assert_eq!(u16::from(addr), 0x1203);
     }
 
     #[test]
@@ -226,10 +245,24 @@ mod tests {
 
     #[test]
     fn test_from_str_invalid() {
+        // Too few parts
         let result = "1.2".parse::<IndividualAddress>();
         assert!(result.is_err());
 
+        // Out of range
         let result = "16.0.0".parse::<IndividualAddress>();
+        assert!(result.is_err());
+
+        // Too many parts
+        let result = "1.2.3.4".parse::<IndividualAddress>();
+        assert!(result.is_err());
+
+        // Non-numeric
+        let result = "a.b.c".parse::<IndividualAddress>();
+        assert!(result.is_err());
+
+        // Empty
+        let result = "".parse::<IndividualAddress>();
         assert!(result.is_err());
     }
 }
