@@ -27,9 +27,11 @@
 //! ```
 
 pub mod addressing;
+pub mod dpt;
 pub mod error;
 pub mod protocol;
 
 // Re-export commonly used types
 pub use addressing::{GroupAddress, IndividualAddress};
+pub use dpt::{Dpt1, DptDecode, DptEncode};
 pub use error::{KnxError, Result};
