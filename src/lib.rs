@@ -33,5 +33,5 @@ pub mod protocol;
 
 // Re-export commonly used types
 pub use addressing::{GroupAddress, IndividualAddress};
-pub use dpt::{Dpt1, DptDecode, DptEncode};
+pub use dpt::{Dpt1, Dpt5, Dpt9, DptDecode, DptEncode};
 pub use error::{KnxError, Result};
