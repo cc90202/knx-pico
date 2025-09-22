@@ -25,6 +25,16 @@ pub const SYSTEM_SETUP_MULTICAST: &str = "224.0.23.11";
 // Service Type Identifiers
 // =============================================================================
 
+// Service type constants (for convenience)
+pub const SERVICE_CONNECT_REQUEST: u16 = 0x0205;
+pub const SERVICE_CONNECT_RESPONSE: u16 = 0x0206;
+pub const SERVICE_CONNECTIONSTATE_REQUEST: u16 = 0x0207;
+pub const SERVICE_CONNECTIONSTATE_RESPONSE: u16 = 0x0208;
+pub const SERVICE_DISCONNECT_REQUEST: u16 = 0x0209;
+pub const SERVICE_DISCONNECT_RESPONSE: u16 = 0x020A;
+pub const SERVICE_TUNNELING_REQUEST: u16 = 0x0420;
+pub const SERVICE_TUNNELING_ACK: u16 = 0x0421;
+
 /// KNXnet/IP Core Service Type Identifiers
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
