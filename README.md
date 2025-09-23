@@ -192,6 +192,115 @@ Value (21.5°C)
   → KNX Bus → Thermostat
 ```
 
+## KNXnet/IP vs Tunneling
+
+### What is KNXnet/IP?
+**KNXnet/IP** is the general protocol for carrying KNX messages over IP networks (Ethernet/WiFi). Think of it as the "postal system" that defines:
+- How to package messages (frame format)
+- How to address packets (IP:port)
+- Which services to offer (tunneling, routing, device management)
+
+### What is Tunneling?
+**Tunneling** is one specific service offered by KNXnet/IP for communicating with the KNX bus. It creates a point-to-point "tunnel" between your client and the KNX gateway.
+
+```
+You (Pico 2W) ←──────────→ KNX Gateway ←──────→ KNX Bus
+               WiFi/IP        Tunneling         Twisted Pair
+              Connection
+```
+
+### KNXnet/IP Services
+
+| Service | Purpose | Use Case |
+|---------|---------|----------|
+| **Tunneling** 🚇 | 1:1 connection with ACK | Control devices, bidirectional, reliable |
+| **Routing** 🔀 | Multicast broadcast | Monitoring, multiple listeners |
+| **Device Management** 🔧 | Configure devices | ETS tools, programming |
+| **Remote Logging** 📝 | Receive logs | Debugging |
+
+### Why Tunneling?
+
+For embedded control (Pico 2 W → KNX), **Tunneling is the right choice**:
+
+| Aspect | Tunneling ✅ | Routing |
+|--------|-------------|---------|
+| Reliability | High (ACK) | Low (no ACK) |
+| Bidirectional | Yes | Yes |
+| Connection | 1:1 dedicated | Multicast |
+| Embedded | Ideal | Possible |
+
+### Tunneling Protocol Flow
+
+**1. Connection Setup**
+```
+Client                           Gateway
+  │                                 │
+  ├─ CONNECT_REQUEST ──────────────→│
+  │                                 │
+  │←────────── CONNECT_RESPONSE ────┤
+  │  (channel ID assigned)          │
+```
+
+**2. Data Exchange**
+```
+Client                           Gateway                    KNX Bus
+  │                                 │                          │
+  ├─ TUNNELING_REQUEST ────────────→│                          │
+  │  (send command)                 ├─ (forward to bus) ──────→│
+  │                                 │                          │
+  │←──────── TUNNELING_ACK ─────────┤                          │
+  │  (acknowledged)                 │                          │
+  │                                 │                          │
+  │←──── TUNNELING_INDICATION ──────┤←─ (bus event) ───────────┤
+  │  (receive event)                │                          │
+  │                                 │                          │
+  ├─ TUNNELING_ACK ─────────────────→│                          │
+```
+
+**3. Keep-Alive**
+```
+Client                           Gateway
+  │                                 │
+  ├─ CONNECTIONSTATE_REQUEST ──────→│
+  │  (every 60 seconds)             │
+  │                                 │
+  │←──── CONNECTIONSTATE_RESPONSE ──┤
+  │  (connection OK)                │
+```
+
+**4. Disconnection**
+```
+Client                           Gateway
+  │                                 │
+  ├─ DISCONNECT_REQUEST ────────────→│
+  │                                 │
+  │←────── DISCONNECT_RESPONSE ─────┤
+```
+
+### Where Do the Layers Fit?
+
+```
+┌─────────────────────────────────────────────┐
+│ KNXnet/IP FRAME                             │ ← General protocol
+│ ┌─────────────────────────────────────────┐ │
+│ │ Service Type: TUNNELING_REQUEST         │ │ ← Specific service
+│ │                                         │ │
+│ │ ┌─────────────────────────────────────┐ │ │
+│ │ │ CEMI: GroupValue_Write              │ │ │ ← KNX command
+│ │ │                                     │ │ │
+│ │ │ ┌─────────────────────────────────┐ │ │ │
+│ │ │ │ DPT 1.001: ON                   │ │ │ │ ← Value
+│ │ │ └─────────────────────────────────┘ │ │ │
+│ │ └─────────────────────────────────────┘ │ │
+│ └─────────────────────────────────────────┘ │
+└─────────────────────────────────────────────┘
+```
+
+- **KNXnet/IP** = FRAME layer (the envelope)
+- **Tunneling** = Service type within the FRAME
+- **CEMI** = KNX command inside the FRAME
+- **DPT** = Encoded value inside CEMI
+
 ## Architecture
 
 ```
@@ -199,7 +308,8 @@ knx-rs/
 ├── addressing/     # KNX addressing system
 ├── protocol/       # KNXnet/IP protocol layer
 │   ├── frame.rs    # Layer 1: KNXnet/IP frames
-│   └── cemi.rs     # Layer 2: CEMI messages
+│   ├── cemi.rs     # Layer 2: CEMI messages
+│   └── services.rs # Tunneling service builders
 ├── dpt/            # Layer 3: Datapoint types
 ├── error.rs        # Error types
 └── lib.rs          # Public API
