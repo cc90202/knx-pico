@@ -7,12 +7,14 @@
 //!
 //! - **DPT 1.xxx** - Boolean (1 bit): switches, buttons, binary sensors
 //! - **DPT 5.xxx** - 8-bit unsigned: percentages, angles, counters
+//! - **DPT 7.xxx** - 16-bit unsigned: pulses, brightness, color temperature
 //! - **DPT 9.xxx** - 2-byte float: temperature, illuminance, pressure
+//! - **DPT 13.xxx** - 32-bit signed: energy, flow rate, long counters
 //!
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use knx_rs::dpt::{Dpt1, Dpt5, Dpt9, DptEncode, DptDecode};
+//! use knx_rs::dpt::{Dpt1, Dpt5, Dpt7, Dpt9, Dpt13, DptEncode, DptDecode};
 //!
 //! // Boolean value
 //! let data = Dpt1::Switch.encode(true)?;
@@ -22,21 +24,33 @@
 //! let byte = Dpt5::Percentage.encode_to_byte(75)?;
 //! let value = Dpt5::Percentage.decode(&[byte])?;
 //!
+//! // Brightness (lux)
+//! let bytes = Dpt7::Brightness.encode_to_bytes(5000)?;
+//! let lux = Dpt7::Brightness.decode(&bytes)?;
+//!
 //! // Temperature (°C)
 //! let bytes = Dpt9::Temperature.encode_to_bytes(21.5)?;
 //! let temp = Dpt9::Temperature.decode_from_bytes(&bytes)?;
+//!
+//! // Active energy (Wh)
+//! let bytes = Dpt13::ActiveEnergy.encode_to_bytes(500000)?;
+//! let wh = Dpt13::ActiveEnergy.decode(&bytes)?;
 //! ```
 
 use crate::error::Result;
 
 pub mod dpt1;
 pub mod dpt5;
+pub mod dpt7;
 pub mod dpt9;
+pub mod dpt13;
 
 // Re-export common types
 pub use dpt1::Dpt1;
 pub use dpt5::Dpt5;
+pub use dpt7::Dpt7;
 pub use dpt9::Dpt9;
+pub use dpt13::Dpt13;
 
 /// Trait for encoding values to KNX data format
 pub trait DptEncode<T> {
