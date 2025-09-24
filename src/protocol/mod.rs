@@ -7,8 +7,10 @@ pub mod cemi;
 pub mod constants;
 pub mod frame;
 pub mod services;
+pub mod tunnel;
 
 pub use cemi::*;
 pub use constants::*;
 pub use frame::*;
 pub use services::*;
+pub use tunnel::*;

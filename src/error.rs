@@ -26,6 +26,10 @@ pub enum KnxError {
     ConnectionRefused,
     /// Connection attempt timed out
     ConnectionTimeout,
+    /// Connection attempt failed
+    ConnectionFailed,
+    /// Connection lost or broken
+    ConnectionLost,
     /// Requested channel was not found
     ChannelNotFound,
     /// No free connection channels available
@@ -34,6 +38,12 @@ pub enum KnxError {
     NotConnected,
     /// Connection is already established
     AlreadyConnected,
+
+    // Tunneling errors
+    /// Sequence number mismatch
+    SequenceMismatch,
+    /// Tunneling ACK failed or contains error
+    TunnelingAckFailed,
 
     // Transport errors
     /// Failed to send data
@@ -89,10 +99,16 @@ impl fmt::Display for KnxError {
             // Connection errors
             KnxError::ConnectionRefused => write!(f, "Connection refused"),
             KnxError::ConnectionTimeout => write!(f, "Connection timeout"),
+            KnxError::ConnectionFailed => write!(f, "Connection failed"),
+            KnxError::ConnectionLost => write!(f, "Connection lost"),
             KnxError::ChannelNotFound => write!(f, "Channel not found"),
             KnxError::NoFreeChannels => write!(f, "No free channels"),
             KnxError::NotConnected => write!(f, "Not connected"),
             KnxError::AlreadyConnected => write!(f, "Already connected"),
+
+            // Tunneling errors
+            KnxError::SequenceMismatch => write!(f, "Sequence number mismatch"),
+            KnxError::TunnelingAckFailed => write!(f, "Tunneling ACK failed"),
 
             // Transport errors
             KnxError::SendFailed => write!(f, "Send failed"),
