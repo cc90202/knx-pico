@@ -137,3 +137,7 @@ impl fmt::Display for KnxError {
         }
     }
 }
+
+// Implement std::error::Error for examples and std-based applications
+#[cfg(feature = "std")]
+impl std::error::Error for KnxError {}

@@ -52,6 +52,9 @@ serde = { version = "1.0.206", default-features = false, features = ["derive"], 
 [features]
 default = []
 
+# Enable std support (for examples and applications)
+std = []
+
 # Enable defmt logging support
 defmt = ["dep:defmt", "heapless/defmt"]
 
