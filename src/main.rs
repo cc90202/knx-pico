@@ -4,6 +4,7 @@
 use cyw43::Control;
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::*;
+use defmt::unwrap;
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
@@ -17,6 +18,9 @@ use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 use panic_persist as _;
 use static_cell::StaticCell;
+
+// Network stack imports
+use embassy_net::{Config, StackResources};
 
 // Program metadata for `picotool info`
 #[unsafe(link_section = ".bi_entries")]
@@ -79,7 +83,7 @@ async fn main(spawner: Spawner) {
 
     static STATE: StaticCell<cyw43::State> = StaticCell::new();
     let state = STATE.init(cyw43::State::new());
-    let (_net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
+    let (net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
 
     spawner.must_spawn(cyw43_task(runner));
 
@@ -88,9 +92,23 @@ async fn main(spawner: Spawner) {
         .set_power_management(cyw43::PowerManagementMode::PowerSave)
         .await;
 
-    // Genera un random seed per il network stack
+    // Configure network stack with DHCP
+    let config = Config::dhcpv4(Default::default());
+
+    // Generate random seed for network stack
     let seed: u64 = RoscRng.next_u64();
     info!("Random seed: {}", seed);
+
+    // Initialize network stack
+    static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+    let (stack, runner) = embassy_net::new(
+        net_device,
+        config,
+        RESOURCES.init(StackResources::new()),
+        seed,
+    );
+
+    unwrap!(spawner.spawn(net_task(runner)));
 
     let shared_control = SharedControl(&*{
         static CONTROL: StaticCell<Mutex<CriticalSectionRawMutex, Control<'static>>> =
@@ -100,7 +118,45 @@ async fn main(spawner: Spawner) {
 
     spawner.must_spawn(blink_task(shared_control));
 
-    info!("KNX-RS initialized");
+    // WiFi connection configuration
+    // Set these via environment variables at build time:
+    // WIFI_SSID=YourNetwork WIFI_PASSWORD=YourPassword cargo build-rp2040
+    let wifi_ssid = option_env!("WIFI_SSID").unwrap_or("YOUR_WIFI_SSID");
+    let wifi_password = option_env!("WIFI_PASSWORD").unwrap_or("YOUR_WIFI_PASSWORD");
+
+    info!("Connecting to WiFi network: {}", wifi_ssid);
+
+    // Join WiFi network
+    loop {
+        {
+            let mut control = shared_control.0.lock().await;
+            match control.join(wifi_ssid, cyw43::JoinOptions::new(wifi_password.as_bytes())).await {
+                Ok(_) => {
+                    info!("WiFi connected successfully!");
+                    break;
+                }
+                Err(e) => {
+                    error!("WiFi connection failed: status={}, retrying in 5s...", e.status);
+                }
+            }
+        }
+        Timer::after(Duration::from_secs(5)).await;
+    }
+
+    // Wait for DHCP to assign IP address
+    info!("Waiting for DHCP...");
+    while !stack.is_config_up() {
+        Timer::after_millis(100).await;
+    }
+
+    if let Some(config) = stack.config_v4() {
+        info!("IP Address: {}", config.address);
+        info!("Gateway: {:?}", config.gateway);
+    }
+
+    info!("KNX-RS initialized and network ready!");
+
+    // TODO: Start KNX client here in Phase 4
 
     // Main loop
     loop {
