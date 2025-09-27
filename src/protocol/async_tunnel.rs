@@ -8,7 +8,7 @@
 //! - Full async/await support with Embassy
 //! - UDP socket integration with embassy-net
 //! - Automatic connection management
-//! - Heartbeat/keep-alive
+//! - Heartbeat/keep-alive (call `send_heartbeat()` every 60s)
 //! - Timeout handling
 //! - Clean error handling
 //!
@@ -42,7 +42,7 @@
 use crate::error::{KnxError, Result};
 use crate::protocol::tunnel::{TunnelClient, Connected};
 use crate::protocol::frame::KnxnetIpFrame;
-use crate::protocol::constants::*;
+use crate::protocol::constants::ServiceType;
 use embassy_net::{Stack, udp::{UdpSocket, PacketMetadata}};
 use embassy_time::{Duration, with_timeout};
 
@@ -52,10 +52,18 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Timeout for receiving responses
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// Recommended heartbeat interval (KNX spec: 60 seconds)
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
+
 /// Maximum UDP packet size for KNXnet/IP
 const MAX_PACKET_SIZE: usize = 512;
 
 /// Async wrapper for TunnelClient with embassy-net UDP
+///
+/// # Note on Memory Usage
+/// This struct contains two 512-byte buffers (rx_buffer, cemi_buffer).
+/// The socket uses separate buffers passed to `new()`.
+/// Total memory: ~1KB for this struct + socket buffers.
 pub struct AsyncTunnelClient<'a> {
     /// UDP socket for communication
     socket: UdpSocket<'a>,
@@ -65,8 +73,8 @@ pub struct AsyncTunnelClient<'a> {
     gateway_port: u16,
     /// Receive buffer for UDP packets
     rx_buffer: [u8; MAX_PACKET_SIZE],
-    /// Transmit buffer for UDP packets
-    tx_buffer: [u8; MAX_PACKET_SIZE],
+    /// Temporary buffer for cEMI data copying (to avoid lifetime issues)
+    cemi_buffer: [u8; MAX_PACKET_SIZE],
     /// Internal tunnel client (when connected)
     client: Option<TunnelClient<Connected>>,
 }
@@ -99,9 +107,22 @@ impl<'a> AsyncTunnelClient<'a> {
             gateway_addr,
             gateway_port,
             rx_buffer: [0u8; MAX_PACKET_SIZE],
-            tx_buffer: [0u8; MAX_PACKET_SIZE],
+            cemi_buffer: [0u8; MAX_PACKET_SIZE],
             client: None,
         }
+    }
+
+    /// Helper to create gateway endpoint (DRY principle)
+    fn gateway_endpoint(&self) -> embassy_net::IpEndpoint {
+        embassy_net::IpEndpoint::new(
+            embassy_net::IpAddress::v4(
+                self.gateway_addr[0],
+                self.gateway_addr[1],
+                self.gateway_addr[2],
+                self.gateway_addr[3],
+            ),
+            self.gateway_port,
+        )
     }
 
     /// Connect to KNX gateway
@@ -127,15 +148,7 @@ impl<'a> AsyncTunnelClient<'a> {
         self.socket.bind(0).map_err(|_| KnxError::SocketError)?;
 
         // Send CONNECT_REQUEST
-        let gateway = embassy_net::IpEndpoint::new(
-            embassy_net::IpAddress::v4(
-                self.gateway_addr[0],
-                self.gateway_addr[1],
-                self.gateway_addr[2],
-                self.gateway_addr[3],
-            ),
-            self.gateway_port,
-        );
+        let gateway = self.gateway_endpoint();
 
         self.socket
             .send_to(frame_data, gateway)
@@ -178,22 +191,15 @@ impl<'a> AsyncTunnelClient<'a> {
     /// client.send_cemi(&cemi_frame).await?;
     /// ```
     pub async fn send_cemi(&mut self, cemi_data: &[u8]) -> Result<()> {
+        // Get gateway endpoint before borrowing client
+        let gateway = self.gateway_endpoint();
+
         let client = self.client.as_mut().ok_or(KnxError::NotConnected)?;
 
         // Build TUNNELING_REQUEST
         let frame_data = client.send_tunneling_request(cemi_data)?;
 
         // Send via UDP
-        let gateway = embassy_net::IpEndpoint::new(
-            embassy_net::IpAddress::v4(
-                self.gateway_addr[0],
-                self.gateway_addr[1],
-                self.gateway_addr[2],
-                self.gateway_addr[3],
-            ),
-            self.gateway_port,
-        );
-
         self.socket
             .send_to(frame_data, gateway)
             .await
@@ -228,6 +234,9 @@ impl<'a> AsyncTunnelClient<'a> {
     /// }
     /// ```
     pub async fn receive(&mut self) -> Result<Option<&[u8]>> {
+        // Get gateway endpoint before borrowing client
+        let gateway = self.gateway_endpoint();
+
         let client = self.client.as_mut().ok_or(KnxError::NotConnected)?;
 
         // Try to receive with timeout
@@ -245,32 +254,21 @@ impl<'a> AsyncTunnelClient<'a> {
                         // Handle TUNNELING_INDICATION
                         let cemi_data = client.handle_tunneling_indication(frame.body())?;
 
-                        // Send ACK
-                        let ack_frame = client.build_tunneling_ack(
-                            client.recv_sequence().wrapping_sub(1),
-                            0
-                        )?;
-
-                        let gateway = embassy_net::IpEndpoint::new(
-                            embassy_net::IpAddress::v4(
-                                self.gateway_addr[0],
-                                self.gateway_addr[1],
-                                self.gateway_addr[2],
-                                self.gateway_addr[3],
-                            ),
-                            self.gateway_port,
-                        );
+                        // Send ACK (handle_tunneling_indication already incremented recv_sequence)
+                        // We need to ACK the sequence we just received
+                        let ack_seq = client.recv_sequence().wrapping_sub(1);
+                        let ack_frame = client.build_tunneling_ack(ack_seq, 0)?;
 
                         self.socket
                             .send_to(ack_frame, gateway)
                             .await
                             .map_err(|_| KnxError::SocketError)?;
 
-                        // Copy cEMI data to our buffer
+                        // Copy cEMI data to our buffer to avoid lifetime issues
                         let len = cemi_data.len();
-                        self.tx_buffer[..len].copy_from_slice(cemi_data);
+                        self.cemi_buffer[..len].copy_from_slice(cemi_data);
 
-                        Ok(Some(&self.tx_buffer[..len]))
+                        Ok(Some(&self.cemi_buffer[..len]))
                     }
                     _ => Ok(None),
                 }
@@ -294,15 +292,7 @@ impl<'a> AsyncTunnelClient<'a> {
             let (_, frame_data) = client.disconnect()?;
 
             // Send via UDP
-            let gateway = embassy_net::IpEndpoint::new(
-                embassy_net::IpAddress::v4(
-                    self.gateway_addr[0],
-                    self.gateway_addr[1],
-                    self.gateway_addr[2],
-                    self.gateway_addr[3],
-                ),
-                self.gateway_port,
-            );
+            let gateway = self.gateway_endpoint();
 
             self.socket
                 .send_to(frame_data, gateway)
@@ -329,6 +319,56 @@ impl<'a> AsyncTunnelClient<'a> {
     /// Get gateway address
     pub fn gateway_addr(&self) -> ([u8; 4], u16) {
         (self.gateway_addr, self.gateway_port)
+    }
+
+    /// Send heartbeat/keep-alive (CONNECTIONSTATE_REQUEST)
+    ///
+    /// Should be called every 60 seconds to keep connection alive.
+    /// The gateway will close the connection if no heartbeat is received.
+    ///
+    /// # Returns
+    /// - `Ok(())` - Heartbeat successful
+    /// - `Err(KnxError)` - Heartbeat failed
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use embassy_time::{Timer, Duration};
+    ///
+    /// loop {
+    ///     Timer::after(Duration::from_secs(60)).await;
+    ///     client.send_heartbeat().await?;
+    /// }
+    /// ```
+    pub async fn send_heartbeat(&mut self) -> Result<()> {
+        let gateway = self.gateway_endpoint();
+
+        let client = self.client.as_mut().ok_or(KnxError::NotConnected)?;
+
+        // Build CONNECTIONSTATE_REQUEST
+        let heartbeat_frame = client.send_heartbeat()?;
+
+        // Send via UDP
+        self.socket
+            .send_to(heartbeat_frame, gateway)
+            .await
+            .map_err(|_| KnxError::SocketError)?;
+
+        // Wait for CONNECTIONSTATE_RESPONSE
+        let (n, _) = with_timeout(RESPONSE_TIMEOUT, self.socket.recv_from(&mut self.rx_buffer))
+            .await
+            .map_err(|_| KnxError::Timeout)?
+            .map_err(|_| KnxError::SocketError)?;
+
+        let frame = KnxnetIpFrame::parse(&self.rx_buffer[..n])?;
+
+        if frame.service_type() == ServiceType::ConnectionstateResponse {
+            // Handle response and check if connection is still alive
+            let connected_client = self.client.take().ok_or(KnxError::NotConnected)?;
+            let connected_client = connected_client.handle_heartbeat_response(frame.body())?;
+            self.client = Some(connected_client);
+        }
+
+        Ok(())
     }
 }
 

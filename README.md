@@ -13,7 +13,13 @@ KNXnet/IP protocol implementation for embedded systems using Rust.
 
 ## Status
 
-🚧 Work in progress - Phase 1 (Core Protocol) completed
+✅ **Phase 1-4 Complete**
+- ✅ Phase 1: Core Protocol (Frame, CEMI, Services)
+- ✅ Phase 2: Datapoint Types (DPT 1, 5, 7, 9, 13)
+- ✅ Phase 3: Tunneling Client with Typestate Pattern
+- ✅ Phase 4: Embassy + RP2040 Integration (Pico 2 W)
+
+🚀 **Ready for hardware testing!**
 
 ## Understanding KNX Layers
 
@@ -301,18 +307,63 @@ Client                           Gateway
 - **CEMI** = KNX command inside the FRAME
 - **DPT** = Encoded value inside CEMI
 
+## Quick Start (Raspberry Pi Pico 2 W)
+
+```rust
+use knx_rs::protocol::async_tunnel::AsyncTunnelClient;
+use knx_rs::addressing::GroupAddress;
+
+// Connect to KNX gateway
+let mut client = AsyncTunnelClient::new(
+    &stack,
+    rx_meta, tx_meta, rx_buffer, tx_buffer,
+    [192, 168, 1, 10],  // Gateway IP
+    3671,               // Gateway port
+);
+client.connect().await?;
+
+// Send GroupValue_Write (turn on light at 1/2/3)
+let light_addr = GroupAddress::from(0x0A03); // 1/2/3
+let cemi_frame = build_group_write_bool(light_addr, true);
+client.send_cemi(&cemi_frame).await?;
+
+// Receive events from KNX bus
+if let Some(cemi_data) = client.receive().await? {
+    // Parse and handle KNX events
+}
+```
+
+See [`examples/pico_knx_async.rs`](examples/pico_knx_async.rs) for complete working example with WiFi setup.
+
+**Build for Pico 2 W:**
+```bash
+cargo build-rp2040 --example pico_knx_async --release
+probe-rs run --chip RP2350 target/thumbv8m.main-none-eabihf/release/examples/pico_knx_async
+```
+
 ## Architecture
 
 ```
 knx-rs/
-├── addressing/     # KNX addressing system
-├── protocol/       # KNXnet/IP protocol layer
-│   ├── frame.rs    # Layer 1: KNXnet/IP frames
-│   ├── cemi.rs     # Layer 2: CEMI messages
-│   └── services.rs # Tunneling service builders
-├── dpt/            # Layer 3: Datapoint types
-├── error.rs        # Error types
-└── lib.rs          # Public API
+├── addressing/          # KNX addressing system
+│   ├── individual.rs    # Individual addresses (area.line.device)
+│   └── group.rs         # Group addresses (main/middle/sub)
+├── protocol/            # KNXnet/IP protocol layer
+│   ├── frame.rs         # Layer 1: KNXnet/IP frames
+│   ├── cemi.rs          # Layer 2: CEMI messages
+│   ├── services.rs      # Tunneling service builders
+│   ├── tunnel.rs        # Typestate tunneling client
+│   └── async_tunnel.rs  # Async wrapper for Embassy
+├── dpt/                 # Layer 3: Datapoint types
+│   ├── dpt1.rs          # Boolean (Switch, Binary)
+│   ├── dpt5.rs          # 8-bit unsigned (Percentage, Angle)
+│   ├── dpt7.rs          # 16-bit unsigned (Counter, Time)
+│   ├── dpt9.rs          # 16-bit float (Temperature, Humidity)
+│   └── dpt13.rs         # 32-bit signed (Counter)
+├── examples/            # Practical examples
+│   └── pico_knx_async.rs # Complete Pico 2 W example
+├── error.rs             # Error types
+└── lib.rs               # Public API
 ```
 
 ## License
