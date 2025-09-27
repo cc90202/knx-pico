@@ -54,6 +54,8 @@ pub enum KnxError {
     BufferTooSmall,
     /// Socket is not bound
     NotBound,
+    /// Socket error (bind, send, receive failed)
+    SocketError,
 
     // Addressing errors
     /// Invalid individual address format
@@ -115,6 +117,7 @@ impl fmt::Display for KnxError {
             KnxError::ReceiveFailed => write!(f, "Receive failed"),
             KnxError::BufferTooSmall => write!(f, "Buffer too small"),
             KnxError::NotBound => write!(f, "Socket not bound"),
+            KnxError::SocketError => write!(f, "Socket error"),
 
             // Addressing errors
             KnxError::InvalidIndividualAddress => write!(f, "Invalid individual address"),
