@@ -19,7 +19,8 @@ path = "src/lib.rs"
 [[bin]]
 name = "knx-rs"
 path = "src/main.rs"
-required-features = ["embassy-rp"]
+# Allow either embassy-rp or embassy-rp-usb feature
+required-features = []
 
 [dependencies]
 # Core library dependencies (no_std)
@@ -61,14 +62,16 @@ defmt = ["dep:defmt", "heapless/defmt"]
 # Enable serde support
 serde = ["dep:serde", "heapless/serde"]
 
-# Feature for building the RP2040 binary
+# USB logger feature (alternative to defmt-rtt)
+usb-logger = ["dep:embassy-usb-logger", "dep:log"]
+
+# Feature for building the RP2040 binary with defmt-rtt (default)
 embassy-rp = [
     "dep:embassy-sync",
     "dep:embassy-executor",
     "dep:embassy-time",
     "dep:embassy-rp",
     "dep:embassy-net",
-    "dep:embassy-usb-logger",
     "dep:cyw43",
     "dep:cyw43-pio",
     "dep:panic-persist",
@@ -76,9 +79,28 @@ embassy-rp = [
     "dep:defmt-rtt",
     "dep:cortex-m-rt",
     "dep:static_cell",
-    "dep:log",
     "dep:critical-section",
     "heapless/defmt",
+]
+
+# Feature for building the RP2040 binary with USB logger
+# Note: defmt-rtt is still needed because dependencies (cyw43, embassy-rp) use defmt internally
+embassy-rp-usb = [
+    "dep:embassy-sync",
+    "dep:embassy-executor",
+    "dep:embassy-time",
+    "dep:embassy-rp",
+    "dep:embassy-net",
+    "dep:cyw43",
+    "dep:cyw43-pio",
+    "dep:panic-persist",
+    "dep:defmt",
+    "dep:defmt-rtt",
+    "dep:cortex-m-rt",
+    "dep:static_cell",
+    "dep:critical-section",
+    "heapless/defmt",
+    "usb-logger",
 ]
 
 [profile.release]

@@ -26,6 +26,7 @@ SERVICE_DISCONNECT_REQUEST = 0x0209
 SERVICE_DISCONNECT_RESPONSE = 0x020A
 SERVICE_TUNNELING_REQUEST = 0x0420
 SERVICE_TUNNELING_ACK = 0x0421
+SERVICE_TUNNELING_INDICATION = 0x0420  # Same as REQUEST but direction is gateway->client
 
 # Status codes
 STATUS_OK = 0x00
@@ -37,7 +38,7 @@ class KNXSimulator:
         self.verbose = verbose
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(('0.0.0.0', port))
-        self.channels = {}  # channel_id -> client_addr
+        self.channels = {}  # channel_id -> (client_addr, sequence_counter)
         self.next_channel = 1
 
     def log(self, msg):
@@ -69,9 +70,9 @@ class KNXSimulator:
         """Handle CONNECT_REQUEST"""
         self.log(f"CONNECT_REQUEST from {client_addr}")
 
-        # Assign channel
+        # Assign channel with sequence counter starting at 0
         channel_id = self.next_channel
-        self.channels[channel_id] = client_addr
+        self.channels[channel_id] = (client_addr, 0)
         self.next_channel += 1
 
         # Build CONNECT_RESPONSE
@@ -126,6 +127,17 @@ class KNXSimulator:
         response = header + body
 
         self.log(f"  → TUNNELING_ACK: seq={sequence}")
+
+        # After receiving 2nd request, simulate bus event
+        # Send a TUNNELING_INDICATION back to test bidirectional communication
+        if sequence == 1:  # After client sends 2nd command (OFF)
+            import time
+            time.sleep(0.5)  # Small delay
+            # Simulate: Light at 1/2/4 was turned ON by another device
+            cemi = self.build_cemi_group_write(0x0A04, True)  # 1/2/4 = ON
+            self.send_tunneling_indication(channel_id, cemi)
+            self.log(f"  💡 Simulated bus event: Light 1/2/4 turned ON")
+
         return response
 
     def handle_connectionstate_request(self, data, client_addr):
@@ -143,6 +155,65 @@ class KNXSimulator:
 
         self.log(f"  → CONNECTIONSTATE_RESPONSE")
         return response
+
+    def build_cemi_group_write(self, group_addr, value_bool):
+        """Build a cEMI L_Data.ind frame for GroupValue_Write"""
+        cemi = bytearray()
+
+        # Message code: L_Data.ind (0x29)
+        cemi.append(0x29)
+
+        # Additional info length: 0
+        cemi.append(0x00)
+
+        # Control field 1: Standard frame
+        cemi.append(0xBC)
+
+        # Control field 2: Group address, hop count 6
+        cemi.append(0xE0)
+
+        # Source address: 1.1.250 (gateway)
+        cemi.extend([0x11, 0xFA])
+
+        # Destination address: group address (2 bytes, big endian)
+        cemi.extend(struct.pack('>H', group_addr))
+
+        # NPDU length: 1
+        cemi.append(0x01)
+
+        # TPCI/APCI
+        cemi.append(0x00)
+
+        # APCI + 6-bit data (GroupValueWrite = 0x80)
+        apci_data = 0x81 if value_bool else 0x80
+        cemi.append(apci_data)
+
+        return bytes(cemi)
+
+    def send_tunneling_indication(self, channel_id, cemi_data):
+        """Send TUNNELING_INDICATION to client"""
+        if channel_id not in self.channels:
+            return
+
+        client_addr, sequence = self.channels[channel_id]
+
+        # Build connection header (4 bytes)
+        conn_header = struct.pack('BBBB', 0x04, channel_id, sequence, 0x00)
+
+        # Build body: connection header + cEMI
+        body = conn_header + cemi_data
+
+        # Build frame
+        header = self.build_header(SERVICE_TUNNELING_INDICATION, len(body))
+        frame = header + body
+
+        # Send
+        self.sock.sendto(frame, client_addr)
+
+        # Update sequence counter
+        self.channels[channel_id] = (client_addr, (sequence + 1) % 256)
+
+        self.log(f"  → TUNNELING_INDICATION: channel={channel_id}, seq={sequence}, cemi_len={len(cemi_data)}")
 
     def run(self):
         """Main server loop"""

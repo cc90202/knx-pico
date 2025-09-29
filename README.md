@@ -335,11 +335,45 @@ if let Some(cemi_data) = client.receive().await? {
 
 See [`examples/pico_knx_async.rs`](examples/pico_knx_async.rs) for complete working example with WiFi setup.
 
-**Build for Pico 2 W:**
+### Build for Pico 2 W
+
+**Option 1: With defmt-rtt (default - requires probe-rs):**
 ```bash
-cargo build-rp2040 --example pico_knx_async --release
-probe-rs run --chip RP2350 target/thumbv8m.main-none-eabihf/release/examples/pico_knx_async
+cargo build-rp2040
+# Flash with probe-rs
+probe-rs run --chip RP2350 target/thumbv8m.main-none-eabihf/debug/knx-rs
 ```
+
+**Option 2: With USB logger (no probe needed):**
+```bash
+cargo build-rp2040-usb --release
+# Flash with picotool
+picotool load -u -v -x -t elf target/thumbv8m.main-none-eabihf/release/knx-rs
+# View logs with serial terminal (e.g., screen, minicom)
+screen /dev/ttyACM0 115200
+```
+
+### Logger Options
+
+This project supports two logging backends:
+
+| Logger | Feature Flag | Use Case | Requires |
+|--------|--------------|----------|----------|
+| **defmt-rtt** | `embassy-rp` (default) | Development with probe-rs | Debug probe (probe-rs) |
+| **USB logger** | `embassy-rp-usb` | Production, no probe needed | USB serial terminal |
+
+**Commands:**
+```bash
+# defmt-rtt (default)
+cargo build-rp2040          # Debug build
+cargo flash-rp2040          # Release build
+
+# USB logger
+cargo build-rp2040-usb      # Debug build
+cargo flash-rp2040-usb      # Release build
+```
+
+**Note:** Both loggers can coexist in the codebase, but only one is active at compile time based on the feature flag.
 
 ## Architecture
 

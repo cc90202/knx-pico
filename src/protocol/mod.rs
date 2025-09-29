@@ -10,7 +10,7 @@ pub mod services;
 pub mod tunnel;
 
 // Async tunnel client (requires embassy-net)
-#[cfg(feature = "embassy-rp")]
+#[cfg(any(feature = "embassy-rp", feature = "embassy-rp-usb"))]
 pub mod async_tunnel;
 
 pub use cemi::*;
@@ -19,5 +19,5 @@ pub use frame::*;
 pub use services::*;
 pub use tunnel::*;
 
-#[cfg(feature = "embassy-rp")]
+#[cfg(any(feature = "embassy-rp", feature = "embassy-rp-usb"))]
 pub use async_tunnel::*;

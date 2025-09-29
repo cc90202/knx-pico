@@ -1,26 +1,60 @@
 #![no_std]
 #![no_main]
 
+mod configuration;
+mod utility;
+mod knx_client;
+
+use crate::utility::*;
+use crate::knx_client::{KnxClient, KnxEvent, format_group_address};
 use cyw43::Control;
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
-use defmt::*;
 use defmt::unwrap;
-use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::{Level, Output};
-use embassy_rp::peripherals::{DMA_CH0, PIO0, USB};
+use embassy_rp::peripherals::{DMA_CH0, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
-use embassy_rp::usb::{Driver, InterruptHandler as UsbInterruptHandler};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 use panic_persist as _;
 use static_cell::StaticCell;
 
+// Conditional imports based on logger choice
+#[cfg(feature = "usb-logger")]
+use embassy_rp::peripherals::USB;
+#[cfg(feature = "usb-logger")]
+use embassy_rp::usb::{Driver, InterruptHandler as UsbInterruptHandler};
+
+// defmt-rtt is always needed because dependencies use defmt internally
+use defmt_rtt as _;
+
 // Network stack imports
 use embassy_net::{Config, StackResources};
+use embassy_net::udp::PacketMetadata;
+
+// KNX imports
+use knx_rs::addressing::GroupAddress;
+
+// Conditional logging macros
+#[cfg(feature = "usb-logger")]
+macro_rules! info {
+    ($($arg:tt)*) => {
+        log::info!($($arg)*)
+    };
+}
+
+#[cfg(feature = "usb-logger")]
+macro_rules! error {
+    ($($arg:tt)*) => {
+        log::error!($($arg)*)
+    };
+}
+
+#[cfg(not(feature = "usb-logger"))]
+use defmt::{info, error};
 
 // Program metadata for `picotool info`
 #[unsafe(link_section = ".bi_entries")]
@@ -39,6 +73,7 @@ bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
 
+#[cfg(feature = "usb-logger")]
 bind_interrupts!(struct UsbIrqs {
     USBCTRL_IRQ => UsbInterruptHandler<USB>;
 });
@@ -52,12 +87,15 @@ pub struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    // Parte il logger su USB
-    let driver = Driver::new(p.USB, UsbIrqs);
-    spawner.must_spawn(logger_task(driver));
+    // Parte il logger appropriato in base alla feature attiva
+    #[cfg(feature = "usb-logger")]
+    {
+        let driver = Driver::new(p.USB, UsbIrqs);
+        spawner.must_spawn(logger_task(driver));
+    }
 
     if let Some(panic_message) = panic_persist::get_panic_message_utf8() {
-        log::error!("{panic_message}");
+        error!("{}", panic_message);
         loop {
             Timer::after_secs(5).await;
         }
@@ -118,11 +156,9 @@ async fn main(spawner: Spawner) {
 
     spawner.must_spawn(blink_task(shared_control));
 
-    // WiFi connection configuration
-    // Set these via environment variables at build time:
-    // WIFI_SSID=YourNetwork WIFI_PASSWORD=YourPassword cargo build-rp2040
-    let wifi_ssid = option_env!("WIFI_SSID").unwrap_or("YOUR_WIFI_SSID");
-    let wifi_password = option_env!("WIFI_PASSWORD").unwrap_or("YOUR_WIFI_PASSWORD");
+    // WiFi connection configuration from configuration.rs
+    let wifi_ssid = get_ssid();
+    let wifi_password = get_wifi_password();
 
     info!("Connecting to WiFi network: {}", wifi_ssid);
 
@@ -156,11 +192,105 @@ async fn main(spawner: Spawner) {
 
     info!("KNX-RS initialized and network ready!");
 
-    // TODO: Start KNX client here in Phase 4
+    // ========================================================================
+    // KNX Connection Test
+    // ========================================================================
 
-    // Main loop
+    // KNX Gateway configuration from configuration.rs
+    let gateway_ip_str = get_knx_gateway_ip();
+    let knx_gateway_ip = parse_ip(gateway_ip_str);
+    let knx_gateway_port = 3671;
+
+    info!("KNX Gateway configured: {}", gateway_ip_str);
+
+    info!("Connecting to KNX gateway at {}.{}.{}.{}:{}",
+          knx_gateway_ip[0], knx_gateway_ip[1], knx_gateway_ip[2], knx_gateway_ip[3], knx_gateway_port);
+
+    // Allocate buffers for AsyncTunnelClient
+    static RX_META: StaticCell<[PacketMetadata; 4]> = StaticCell::new();
+    static TX_META: StaticCell<[PacketMetadata; 4]> = StaticCell::new();
+    static RX_BUFFER: StaticCell<[u8; 2048]> = StaticCell::new();
+    static TX_BUFFER: StaticCell<[u8; 2048]> = StaticCell::new();
+
+    let rx_meta = RX_META.init([PacketMetadata::EMPTY; 4]);
+    let tx_meta = TX_META.init([PacketMetadata::EMPTY; 4]);
+    let rx_buffer = RX_BUFFER.init([0u8; 2048]);
+    let tx_buffer = TX_BUFFER.init([0u8; 2048]);
+
+    let mut client = KnxClient::new(
+        &stack,
+        rx_meta,
+        tx_meta,
+        rx_buffer,
+        tx_buffer,
+        knx_gateway_ip,
+        knx_gateway_port,
+    );
+
+    // Connect to gateway
+    info!("Attempting to connect...");
+    match client.connect().await {
+        Ok(_) => info!("✓ Connected to KNX gateway!"),
+        Err(_) => {
+            error!("✗ Failed to connect to KNX gateway");
+            loop {
+                Timer::after(Duration::from_secs(10)).await;
+            }
+        }
+    }
+
+    // Test: Send boolean commands to group address 1/2/3
+    let light_addr = GroupAddress::from(0x0A03); // 1/2/3
+
+    info!("Sending test: bool=true to 1/2/3");
+    match client.send_bool(light_addr, true).await {
+        Ok(_) => info!("✓ Command sent successfully"),
+        Err(_) => error!("✗ Failed to send command"),
+    }
+
+    Timer::after(Duration::from_secs(2)).await;
+
+    info!("Sending test: bool=false to 1/2/3");
+    match client.send_bool(light_addr, false).await {
+        Ok(_) => info!("✓ Command sent successfully"),
+        Err(_) => error!("✗ Failed to send command"),
+    }
+
+    // Listen for KNX bus events
+    info!("Listening for KNX bus events...");
     loop {
-        Timer::after(Duration::from_secs(60)).await;
+        match client.receive_event().await {
+            Ok(Some(event)) => {
+                match event {
+                    KnxEvent::LightSwitch { address, on } => {
+                        let (main, middle, sub) = format_group_address(address);
+                        info!(
+                            "💡 Light {}/{}/{} turned {}",
+                            main,
+                            middle,
+                            sub,
+                            if on { "ON" } else { "OFF" }
+                        );
+                    }
+                    KnxEvent::ValueRead { address } => {
+                        let (main, middle, sub) = format_group_address(address);
+                        info!("📖 Value read request from {}/{}/{}", main, middle, sub);
+                    }
+                    KnxEvent::Unknown { address, data_len } => {
+                        let (main, middle, sub) = format_group_address(address);
+                        info!("❓ Unknown event at {}/{}/{} ({} bytes)", main, middle, sub, data_len);
+                    }
+                }
+            }
+            Ok(None) => {
+                // No data (timeout)
+            }
+            Err(_) => {
+                error!("❌ Receive error");
+            }
+        }
+
+        Timer::after(Duration::from_millis(100)).await;
     }
 }
 
@@ -176,6 +306,7 @@ async fn net_task(mut runner: embassy_net::Runner<'static, cyw43::NetDriver<'sta
     runner.run().await
 }
 
+#[cfg(feature = "usb-logger")]
 #[embassy_executor::task]
 async fn logger_task(driver: Driver<'static, USB>) {
     embassy_usb_logger::run!(1024, log::LevelFilter::Info, driver);
@@ -191,3 +322,4 @@ async fn blink_task(shared_control: SharedControl) {
         Timer::after(delay).await;
     }
 }
+

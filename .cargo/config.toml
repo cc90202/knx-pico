@@ -17,6 +17,13 @@ DEFMT_LOG = "debug"
 # Custom aliases for common commands
 test-host = "test --lib --target aarch64-apple-darwin"
 test-host-release = "test --lib --release --target aarch64-apple-darwin"
+
+# Build with defmt-rtt logger (default)
 build-rp2040 = "build --bin knx-rs --features embassy-rp --target thumbv8m.main-none-eabihf"
 check-rp2040 = "check --bin knx-rs --features embassy-rp --target thumbv8m.main-none-eabihf"
-flash-rp2040 = "build --bin knx-rs --features embassy-rp --target thumbv8m.main-none-eabihf --release"
+flash-rp2040 = "run --bin knx-rs --features embassy-rp --target thumbv8m.main-none-eabihf --release"
+
+# Build with USB logger (build+flash in one command)
+build-rp2040-usb = "build --bin knx-rs --features embassy-rp-usb --target thumbv8m.main-none-eabihf"
+check-rp2040-usb = "check --bin knx-rs --features embassy-rp-usb --target thumbv8m.main-none-eabihf"
+flash-rp2040-usb = "run --bin knx-rs --features embassy-rp-usb --target thumbv8m.main-none-eabihf --release"
