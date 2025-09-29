@@ -211,7 +211,7 @@ impl TunnelClient<Idle> {
         // SAFETY: We need to return a 'static reference but we own the buffer
         // This is a limitation of the current API - will be solved with async in Phase 4
         // For now, caller must use the frame before next operation
-        Ok((client, unsafe { core::mem::transmute(frame_data) }))
+        Ok((client, unsafe { core::mem::transmute::<&[u8], &[u8]>(frame_data) }))
     }
 }
 
@@ -440,7 +440,7 @@ impl TunnelClient<Connected> {
         };
 
         // SAFETY: Same as connect() - will be fixed in Phase 4
-        Ok((client, unsafe { core::mem::transmute(frame_data) }))
+        Ok((client, unsafe { core::mem::transmute::<&[u8], &[u8]>(frame_data) }))
     }
 }
 

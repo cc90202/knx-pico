@@ -169,13 +169,13 @@ impl Dpt9 {
         let mut mantissa_f = value * 100.0;
 
         // Scale to fit mantissa in 11-bit signed range: -1024 to +1023
-        while (mantissa_f > 1023.0 || mantissa_f < -1024.0) && exponent < 15 {
+        while !(-1024.0..=1023.0).contains(&mantissa_f) && exponent < 15 {
             exponent += 1;
             mantissa_f = value * 100.0 / (1u32 << exponent) as f32;
         }
 
         // Check range
-        if mantissa_f > 1023.0 || mantissa_f < -1024.0 {
+        if !(-1024.0..=1023.0).contains(&mantissa_f) {
             return Err(KnxError::DptValueOutOfRange);
         }
 
@@ -214,7 +214,7 @@ impl Dpt9 {
 
         // Extract fields
         let exponent = ((value_u16 >> 11) & 0x0F) as u8;
-        let mantissa_raw = (value_u16 & 0x07FF) as u16;
+        let mantissa_raw = value_u16 & 0x07FF;
 
         // Convert mantissa from 11-bit two's complement
         let mantissa = if mantissa_raw & 0x0400 != 0 {
