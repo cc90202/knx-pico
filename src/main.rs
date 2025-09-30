@@ -6,7 +6,7 @@ mod utility;
 mod knx_client;
 
 use crate::utility::*;
-use crate::knx_client::{KnxClient, KnxEvent, format_group_address};
+use crate::knx_client::{KnxClient, KnxEvent, KnxValue, format_group_address};
 use cyw43::Control;
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::unwrap;
@@ -243,7 +243,7 @@ async fn main(spawner: Spawner) {
     let light_addr = GroupAddress::from(0x0A03); // 1/2/3
 
     info!("Sending test: bool=true to 1/2/3");
-    match client.send_bool(light_addr, true).await {
+    match client.write(light_addr, KnxValue::Bool(true)).await {
         Ok(_) => info!("✓ Command sent successfully"),
         Err(_) => error!("✗ Failed to send command"),
     }
@@ -251,7 +251,7 @@ async fn main(spawner: Spawner) {
     Timer::after(Duration::from_secs(2)).await;
 
     info!("Sending test: bool=false to 1/2/3");
-    match client.send_bool(light_addr, false).await {
+    match client.write(light_addr, KnxValue::Bool(false)).await {
         Ok(_) => info!("✓ Command sent successfully"),
         Err(_) => error!("✗ Failed to send command"),
     }
@@ -262,17 +262,44 @@ async fn main(spawner: Spawner) {
         match client.receive_event().await {
             Ok(Some(event)) => {
                 match event {
-                    KnxEvent::LightSwitch { address, on } => {
+                    KnxEvent::GroupWrite { address, value } => {
                         let (main, middle, sub) = format_group_address(address);
-                        info!(
-                            "💡 Light {}/{}/{} turned {}",
-                            main,
-                            middle,
-                            sub,
-                            if on { "ON" } else { "OFF" }
-                        );
+                        match value {
+                            KnxValue::Bool(on) => {
+                                info!(
+                                    "💡 Switch {}/{}/{}: {}",
+                                    main,
+                                    middle,
+                                    sub,
+                                    if on { "ON" } else { "OFF" }
+                                );
+                            }
+                            KnxValue::Percent(p) => {
+                                info!(
+                                    "📊 Dimmer {}/{}/{}: {}%",
+                                    main,
+                                    middle,
+                                    sub,
+                                    p
+                                );
+                            }
+                            KnxValue::Temperature(t) => {
+                                // Convert to fixed-point for display (1 decimal place)
+                                let temp_int = (t * 10.0) as i32;
+                                let whole = temp_int / 10;
+                                let frac = (temp_int % 10).abs();
+                                info!(
+                                    "🌡️  Sensor {}/{}/{}: {}.{}°C",
+                                    main,
+                                    middle,
+                                    sub,
+                                    whole,
+                                    frac
+                                );
+                            }
+                        }
                     }
-                    KnxEvent::ValueRead { address } => {
+                    KnxEvent::GroupRead { address } => {
                         let (main, middle, sub) = format_group_address(address);
                         info!("📖 Value read request from {}/{}/{}", main, middle, sub);
                     }
