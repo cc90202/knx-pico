@@ -303,6 +303,43 @@ async fn main(spawner: Spawner) {
                         let (main, middle, sub) = format_group_address(address);
                         info!("📖 Value read request from {}/{}/{}", main, middle, sub);
                     }
+                    KnxEvent::GroupResponse { address, value } => {
+                        let (main, middle, sub) = format_group_address(address);
+                        match value {
+                            KnxValue::Bool(on) => {
+                                info!(
+                                    "📬 Response {}/{}/{}: {}",
+                                    main,
+                                    middle,
+                                    sub,
+                                    if on { "ON" } else { "OFF" }
+                                );
+                            }
+                            KnxValue::Percent(p) => {
+                                info!(
+                                    "📬 Response {}/{}/{}: {}%",
+                                    main,
+                                    middle,
+                                    sub,
+                                    p
+                                );
+                            }
+                            KnxValue::Temperature(t) => {
+                                // Convert to fixed-point for display (1 decimal place)
+                                let temp_int = (t * 10.0) as i32;
+                                let whole = temp_int / 10;
+                                let frac = (temp_int % 10).abs();
+                                info!(
+                                    "📬 Response {}/{}/{}: {}.{}°C",
+                                    main,
+                                    middle,
+                                    sub,
+                                    whole,
+                                    frac
+                                );
+                            }
+                        }
+                    }
                     KnxEvent::Unknown { address, data_len } => {
                         let (main, middle, sub) = format_group_address(address);
                         info!("❓ Unknown event at {}/{}/{} ({} bytes)", main, middle, sub, data_len);

@@ -29,6 +29,8 @@ pub enum KnxEvent {
     GroupWrite { address: GroupAddress, value: KnxValue },
     /// Group value read request
     GroupRead { address: GroupAddress },
+    /// Group value response (answer to read request)
+    GroupResponse { address: GroupAddress, value: KnxValue },
     /// Unknown/unparsed event
     Unknown { address: GroupAddress, data_len: usize },
 }
@@ -80,6 +82,13 @@ impl<'a> KnxClient<'a> {
         self.tunnel.send_cemi(&cemi).await.map_err(|_| ())
     }
 
+    /// Respond with a value to a group address (GroupValue_Response)
+    pub async fn respond(&mut self, address: GroupAddress, value: KnxValue) -> Result<(), ()> {
+        let mut buffer = [0u8; 16]; // Max frame size
+        let len = build_group_response(address, value, &mut buffer);
+        self.tunnel.send_cemi(&buffer[..len]).await.map_err(|_| ())
+    }
+
     /// Send raw cEMI frame (for advanced usage)
     pub async fn send_raw_cemi(&mut self, cemi: &[u8]) -> Result<(), ()> {
         self.tunnel.send_cemi(cemi).await.map_err(|_| ())
@@ -94,22 +103,40 @@ impl<'a> KnxClient<'a> {
                     if let Ok(ldata) = cemi.as_ldata() {
                         // Extract destination group address
                         if let Some(dest) = ldata.destination_group() {
-                            // Check message type
-                            if ldata.is_group_write() {
-                                // Try to decode value
-                                if let Some(value) = decode_value(&ldata.data) {
-                                    return Ok(Some(KnxEvent::GroupWrite {
-                                        address: dest,
-                                        value,
-                                    }));
-                                } else {
-                                    return Ok(Some(KnxEvent::Unknown {
-                                        address: dest,
-                                        data_len: ldata.data.len(),
-                                    }));
+                            // Check message type by examining APCI
+                            if ldata.data.len() > 0 {
+                                let apci = ldata.data[0] & 0xC0; // Extract APCI bits
+
+                                if apci == 0x80 {
+                                    // GroupValue_Write (0x80)
+                                    if let Some(value) = decode_value(&ldata.data) {
+                                        return Ok(Some(KnxEvent::GroupWrite {
+                                            address: dest,
+                                            value,
+                                        }));
+                                    } else {
+                                        return Ok(Some(KnxEvent::Unknown {
+                                            address: dest,
+                                            data_len: ldata.data.len(),
+                                        }));
+                                    }
+                                } else if apci == 0x40 {
+                                    // GroupValue_Response (0x40)
+                                    if let Some(value) = decode_value(&ldata.data) {
+                                        return Ok(Some(KnxEvent::GroupResponse {
+                                            address: dest,
+                                            value,
+                                        }));
+                                    } else {
+                                        return Ok(Some(KnxEvent::Unknown {
+                                            address: dest,
+                                            data_len: ldata.data.len(),
+                                        }));
+                                    }
+                                } else if apci == 0x00 {
+                                    // GroupValue_Read (0x00)
+                                    return Ok(Some(KnxEvent::GroupRead { address: dest }));
                                 }
-                            } else if ldata.is_group_read() {
-                                return Ok(Some(KnxEvent::GroupRead { address: dest }));
                             }
                         }
                     }
@@ -157,6 +184,40 @@ fn build_group_write(group_addr: GroupAddress, value: KnxValue, buffer: &mut [u8
     encode_value(value, &mut buffer[8..])
 }
 
+/// Helper: Build cEMI L_Data.req frame for GroupValue_Response
+/// Returns the frame length
+fn build_group_response(group_addr: GroupAddress, value: KnxValue, buffer: &mut [u8]) -> usize {
+    let device_addr = IndividualAddress::from(DEVICE_ADDRESS_RAW);
+
+    // Message code: L_Data.req
+    buffer[0] = CEMIMessageCode::LDataReq.to_u8();
+
+    // Additional info length: 0
+    buffer[1] = 0x00;
+
+    // Control fields
+    buffer[2] = ControlField1::default().raw();
+    buffer[3] = ControlField2::default().raw();
+
+    // Source address
+    let source_raw: u16 = device_addr.into();
+    let source_bytes = source_raw.to_be_bytes();
+    buffer[4] = source_bytes[0];
+    buffer[5] = source_bytes[1];
+
+    // Destination address
+    let dest_raw: u16 = group_addr.into();
+    let dest_bytes = dest_raw.to_be_bytes();
+    buffer[6] = dest_bytes[0];
+    buffer[7] = dest_bytes[1];
+
+    // TPCI/APCI (GroupValue_Response = 0x00)
+    buffer[9] = 0x00;
+
+    // Encode value with response APCI and return frame length
+    encode_value_response(value, &mut buffer[8..])
+}
+
 /// Helper: Build cEMI L_Data.req frame for GroupValue_Read
 fn build_group_read(group_addr: GroupAddress) -> [u8; 11] {
     let mut frame = [0u8; 11];
@@ -196,17 +257,29 @@ fn build_group_read(group_addr: GroupAddress) -> [u8; 11] {
     frame
 }
 
-/// Encode KnxValue to NPDU length + TPCI/APCI + data
+/// Encode KnxValue to NPDU length + TPCI/APCI + data for Write
 /// Buffer should start at byte 8 (NPDU length position)
 /// Returns total frame length
 fn encode_value(value: KnxValue, buffer: &mut [u8]) -> usize {
+    encode_value_with_apci(value, buffer, 0x80) // 0x80 = GroupValue_Write
+}
+
+/// Encode KnxValue to NPDU length + TPCI/APCI + data for Response
+/// Buffer should start at byte 8 (NPDU length position)
+/// Returns total frame length
+fn encode_value_response(value: KnxValue, buffer: &mut [u8]) -> usize {
+    encode_value_with_apci(value, buffer, 0x40) // 0x40 = GroupValue_Response
+}
+
+/// Encode KnxValue with specified APCI
+fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize {
     match value {
         KnxValue::Bool(b) => {
             // DPT 1: 6-bit data encoded in APCI byte
             // NPDU length = 1 (only TPCI/APCI + data byte)
             buffer[0] = 0x01; // NPDU length
             buffer[1] = 0x00; // TPCI/APCI
-            buffer[2] = if b { 0x81 } else { 0x80 }; // APCI + 6-bit data
+            buffer[2] = apci | if b { 0x01 } else { 0x00 }; // APCI + 6-bit data
             11 // Total frame length
         }
         KnxValue::Percent(p) => {
@@ -214,7 +287,7 @@ fn encode_value(value: KnxValue, buffer: &mut [u8]) -> usize {
             let value = ((p.min(100) as u16 * 255) / 100) as u8;
             buffer[0] = 0x02; // NPDU length
             buffer[1] = 0x00; // TPCI/APCI
-            buffer[2] = 0x80; // APCI (GroupValue_Write)
+            buffer[2] = apci; // APCI
             buffer[3] = value; // 1 byte data
             12 // Total frame length
         }
@@ -223,7 +296,7 @@ fn encode_value(value: KnxValue, buffer: &mut [u8]) -> usize {
             let encoded = encode_dpt9(t);
             buffer[0] = 0x03; // NPDU length
             buffer[1] = 0x00; // TPCI/APCI
-            buffer[2] = 0x80; // APCI (GroupValue_Write)
+            buffer[2] = apci; // APCI
             buffer[3] = (encoded >> 8) as u8; // High byte
             buffer[4] = (encoded & 0xFF) as u8; // Low byte
             13 // Total frame length
