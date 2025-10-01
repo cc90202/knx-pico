@@ -18,8 +18,20 @@ pub enum KnxValue {
     Bool(bool),
     /// Percentage (DPT 5.001) - 0-100%
     Percent(u8),
-    /// Temperature in Celsius (DPT 9.001) - -273.0 to +670760.0
+    /// Unsigned 8-bit value (DPT 5.010) - 0-255
+    U8(u8),
+    /// Unsigned 16-bit value (DPT 7.001) - 0-65535
+    U16(u16),
+    /// Temperature in Celsius (DPT 9.001)
     Temperature(f32),
+    /// Lux - Illuminance (DPT 9.004)
+    Lux(f32),
+    /// Humidity (DPT 9.007) - 0-100%
+    Humidity(f32),
+    /// Air quality - ppm (DPT 9.008)
+    Ppm(f32),
+    /// Generic 2-byte float (DPT 9.xxx) for other variants
+    Float2(f32),
 }
 
 /// High-level KNX event
@@ -104,12 +116,12 @@ impl<'a> KnxClient<'a> {
                         // Extract destination group address
                         if let Some(dest) = ldata.destination_group() {
                             // Check message type by examining APCI
-                            if ldata.data.len() > 0 {
+                            if !ldata.data.is_empty() {
                                 let apci = ldata.data[0] & 0xC0; // Extract APCI bits
 
                                 if apci == 0x80 {
                                     // GroupValue_Write (0x80)
-                                    if let Some(value) = decode_value(&ldata.data) {
+                                    if let Some(value) = decode_value(ldata.data) {
                                         return Ok(Some(KnxEvent::GroupWrite {
                                             address: dest,
                                             value,
@@ -122,7 +134,7 @@ impl<'a> KnxClient<'a> {
                                     }
                                 } else if apci == 0x40 {
                                     // GroupValue_Response (0x40)
-                                    if let Some(value) = decode_value(&ldata.data) {
+                                    if let Some(value) = decode_value(ldata.data) {
                                         return Ok(Some(KnxEvent::GroupResponse {
                                             address: dest,
                                             value,
@@ -291,8 +303,27 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
             buffer[3] = value; // 1 byte data
             12 // Total frame length
         }
-        KnxValue::Temperature(t) => {
-            // DPT 9.001: 2-byte float (KNX format)
+        KnxValue::U8(v) => {
+            // DPT 5.010: 1 byte unsigned (0-255)
+            buffer[0] = 0x02; // NPDU length
+            buffer[1] = 0x00; // TPCI/APCI
+            buffer[2] = apci; // APCI
+            buffer[3] = v; // 1 byte data
+            12 // Total frame length
+        }
+        KnxValue::U16(v) => {
+            // DPT 7.001: 2 bytes unsigned (0-65535)
+            buffer[0] = 0x03; // NPDU length
+            buffer[1] = 0x00; // TPCI/APCI
+            buffer[2] = apci; // APCI
+            buffer[3] = (v >> 8) as u8; // High byte
+            buffer[4] = (v & 0xFF) as u8; // Low byte
+            13 // Total frame length
+        }
+        KnxValue::Temperature(t) | KnxValue::Lux(t) | KnxValue::Humidity(t)
+        | KnxValue::Ppm(t) | KnxValue::Float2(t) => {
+            // DPT 9.xxx: 2-byte float (KNX format)
+            // All DPT 9 variants use the same encoding
             let encoded = encode_dpt9(t);
             buffer[0] = 0x03; // NPDU length
             buffer[1] = 0x00; // TPCI/APCI
@@ -309,14 +340,14 @@ fn encode_dpt9(value: f32) -> u16 {
     // DPT 9: (0.01 * m) * 2^e
     // Range: -671088.64 to +670760.96
 
-    let value = value.clamp(-671088.64, 670760.96);
+    let value = value.clamp(-671_088.6, 670_760.96);
 
     // Find exponent and mantissa
     let mut exponent = 0i32;
     let mut mantissa = (value * 100.0) as i32;
 
     // Normalize mantissa to 11-bit signed (-2048 to +2047)
-    while mantissa < -2048 || mantissa > 2047 {
+    while !(-2048..=2047).contains(&mantissa) {
         mantissa >>= 1;
         exponent += 1;
     }
@@ -328,12 +359,19 @@ fn encode_dpt9(value: f32) -> u16 {
     // M = mantissa sign bit, E = exponent, M = mantissa
     let sign = if mantissa < 0 { 1u16 << 15 } else { 0 };
     let exp_bits = ((exponent as u16) & 0x0F) << 11;
-    let mantissa_bits = (mantissa.abs() as u16) & 0x07FF;
+    let mantissa_bits = mantissa.unsigned_abs() as u16 & 0x07FF;
 
     sign | exp_bits | mantissa_bits
 }
 
 /// Decode APCI+data bytes to KnxValue
+///
+/// Note: Cannot distinguish between variants with same encoding:
+/// - 1-byte: Returns U8 (could also be Percent)
+/// - 2-byte: Returns U16
+/// - 2-byte float: Returns Float2 (could be Temperature, Lux, Humidity, etc.)
+///
+/// Application should interpret based on group address context.
 fn decode_value(data: &[u8]) -> Option<KnxValue> {
     match data.len() {
         1 => {
@@ -342,16 +380,30 @@ fn decode_value(data: &[u8]) -> Option<KnxValue> {
             Some(KnxValue::Bool(value))
         }
         2 => {
-            // DPT 5.001: 1 byte unsigned (0-255 mapped to 0-100%)
+            // DPT 5.xxx: 1 byte unsigned (0-255)
+            // Could be DPT 5.001 (Percent), DPT 5.010 (U8), etc.
+            // Return generic U8, application interprets based on context
             let raw = data[1];
-            let percent = ((raw as u16 * 100) / 255) as u8;
-            Some(KnxValue::Percent(percent))
+            Some(KnxValue::U8(raw))
         }
         3 => {
-            // DPT 9.001: 2-byte float
-            let raw = ((data[1] as u16) << 8) | (data[2] as u16);
-            let temp = decode_dpt9(raw);
-            Some(KnxValue::Temperature(temp))
+            // Check if it's a 2-byte unsigned or 2-byte float
+            // DPT 7.xxx (U16) vs DPT 9.xxx (Float2)
+            // We distinguish by checking if high bits suggest float encoding
+            let byte1 = data[1];
+            let byte2 = data[2];
+            let raw_u16 = ((byte1 as u16) << 8) | (byte2 as u16);
+
+            // If top bit is set or looks like float format, decode as float
+            // This is heuristic - ideally we'd know the DPT from context
+            if (raw_u16 & 0x8000) != 0 || (raw_u16 & 0x7800) != 0 {
+                // Likely DPT 9.xxx (2-byte float)
+                let value = decode_dpt9(raw_u16);
+                Some(KnxValue::Float2(value))
+            } else {
+                // Likely DPT 7.xxx (2-byte unsigned)
+                Some(KnxValue::U16(raw_u16))
+            }
         }
         _ => None,
     }

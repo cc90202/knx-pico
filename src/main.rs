@@ -283,13 +283,82 @@ async fn main(spawner: Spawner) {
                                     p
                                 );
                             }
+                            KnxValue::U8(v) => {
+                                info!(
+                                    "🔢 U8 {}/{}/{}: {}",
+                                    main,
+                                    middle,
+                                    sub,
+                                    v
+                                );
+                            }
+                            KnxValue::U16(v) => {
+                                info!(
+                                    "🔢 U16 {}/{}/{}: {}",
+                                    main,
+                                    middle,
+                                    sub,
+                                    v
+                                );
+                            }
                             KnxValue::Temperature(t) => {
-                                // Convert to fixed-point for display (1 decimal place)
                                 let temp_int = (t * 10.0) as i32;
                                 let whole = temp_int / 10;
                                 let frac = (temp_int % 10).abs();
                                 info!(
-                                    "🌡️  Sensor {}/{}/{}: {}.{}°C",
+                                    "🌡️  Temperature {}/{}/{}: {}.{}°C",
+                                    main,
+                                    middle,
+                                    sub,
+                                    whole,
+                                    frac
+                                );
+                            }
+                            KnxValue::Lux(v) => {
+                                let val_int = (v * 10.0) as i32;
+                                let whole = val_int / 10;
+                                let frac = (val_int % 10).abs();
+                                info!(
+                                    "💡 Lux {}/{}/{}: {}.{} lx",
+                                    main,
+                                    middle,
+                                    sub,
+                                    whole,
+                                    frac
+                                );
+                            }
+                            KnxValue::Humidity(h) => {
+                                let hum_int = (h * 10.0) as i32;
+                                let whole = hum_int / 10;
+                                let frac = (hum_int % 10).abs();
+                                info!(
+                                    "💧 Humidity {}/{}/{}: {}.{}%",
+                                    main,
+                                    middle,
+                                    sub,
+                                    whole,
+                                    frac
+                                );
+                            }
+                            KnxValue::Ppm(p) => {
+                                let ppm_int = (p * 10.0) as i32;
+                                let whole = ppm_int / 10;
+                                let frac = (ppm_int % 10).abs();
+                                info!(
+                                    "🌫️  PPM {}/{}/{}: {}.{} ppm",
+                                    main,
+                                    middle,
+                                    sub,
+                                    whole,
+                                    frac
+                                );
+                            }
+                            KnxValue::Float2(f) => {
+                                let val_int = (f * 10.0) as i32;
+                                let whole = val_int / 10;
+                                let frac = (val_int % 10).abs();
+                                info!(
+                                    "📈 Float {}/{}/{}: {}.{}",
                                     main,
                                     middle,
                                     sub,
@@ -305,6 +374,7 @@ async fn main(spawner: Spawner) {
                     }
                     KnxEvent::GroupResponse { address, value } => {
                         let (main, middle, sub) = format_group_address(address);
+                        // Use same formatting as GroupWrite
                         match value {
                             KnxValue::Bool(on) => {
                                 info!(
@@ -316,21 +386,21 @@ async fn main(spawner: Spawner) {
                                 );
                             }
                             KnxValue::Percent(p) => {
-                                info!(
-                                    "📬 Response {}/{}/{}: {}%",
-                                    main,
-                                    middle,
-                                    sub,
-                                    p
-                                );
+                                info!("📬 Response {}/{}/{}: {}%", main, middle, sub, p);
                             }
-                            KnxValue::Temperature(t) => {
-                                // Convert to fixed-point for display (1 decimal place)
-                                let temp_int = (t * 10.0) as i32;
-                                let whole = temp_int / 10;
-                                let frac = (temp_int % 10).abs();
+                            KnxValue::U8(v) => {
+                                info!("📬 Response {}/{}/{}: {} (U8)", main, middle, sub, v);
+                            }
+                            KnxValue::U16(v) => {
+                                info!("📬 Response {}/{}/{}: {} (U16)", main, middle, sub, v);
+                            }
+                            KnxValue::Temperature(t) | KnxValue::Lux(t) | KnxValue::Humidity(t)
+                            | KnxValue::Ppm(t) | KnxValue::Float2(t) => {
+                                let val_int = (t * 10.0) as i32;
+                                let whole = val_int / 10;
+                                let frac = (val_int % 10).abs();
                                 info!(
-                                    "📬 Response {}/{}/{}: {}.{}°C",
+                                    "📬 Response {}/{}/{}: {}.{} (Float)",
                                     main,
                                     middle,
                                     sub,
