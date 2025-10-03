@@ -1,5 +1,5 @@
-//! File di configurazione di variabili ambiente
-//! da modificare a seconda del proprio ambiente.
+//! Configuration file for environment variables.
+//! Modify according to your environment.
 
 pub const CONFIG: &str = r#"
 WIFI_NETWORK=YOUR_WIFI_SSID

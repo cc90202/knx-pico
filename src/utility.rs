@@ -2,10 +2,10 @@
 
 use crate::configuration::CONFIG;
 
-/// Estrae l'SSID dalla configurazione.
+/// Extracts the WiFi SSID from configuration.
 ///
-/// # Ritorna
-/// * &str - SSID della rete WiFi
+/// # Returns
+/// * `&str` - WiFi network SSID
 pub fn get_ssid() -> &'static str {
     CONFIG
         .lines()
@@ -14,10 +14,10 @@ pub fn get_ssid() -> &'static str {
         .unwrap_or("YOUR_WIFI_SSID")
 }
 
-/// Estrae la password WiFi dalla configurazione.
+/// Extracts the WiFi password from configuration.
 ///
-/// # Ritorna
-/// * &str - Password della rete WiFi
+/// # Returns
+/// * `&str` - WiFi network password
 pub fn get_wifi_password() -> &'static str {
     CONFIG
         .lines()
@@ -26,10 +26,10 @@ pub fn get_wifi_password() -> &'static str {
         .unwrap_or("YOUR_WIFI_PASSWORD")
 }
 
-/// Estrae l'IP del gateway KNX dalla configurazione.
+/// Extracts the KNX gateway IP address from configuration.
 ///
-/// # Ritorna
-/// * &str - IP del gateway KNX (formato "a.b.c.d")
+/// # Returns
+/// * `&str` - KNX gateway IP address in format "a.b.c.d"
 pub fn get_knx_gateway_ip() -> &'static str {
     CONFIG
         .lines()
@@ -38,7 +38,13 @@ pub fn get_knx_gateway_ip() -> &'static str {
         .unwrap_or("192.168.1.10")
 }
 
-/// Parse IP address string "a.b.c.d" into [u8; 4]
+/// Parse IP address string "a.b.c.d" into `[u8; 4]` array.
+///
+/// # Arguments
+/// * `ip_str` - IP address string in dotted decimal format
+///
+/// # Returns
+/// * `[u8; 4]` - IP address as byte array, defaults to [192, 168, 1, 10] on parse error
 pub fn parse_ip(ip_str: &str) -> [u8; 4] {
     let parts: heapless::Vec<&str, 4> = ip_str.split('.').collect();
     if parts.len() == 4 {

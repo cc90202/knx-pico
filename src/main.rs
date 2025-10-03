@@ -79,16 +79,16 @@ bind_interrupts!(struct UsbIrqs {
     USBCTRL_IRQ => UsbInterruptHandler<USB>;
 });
 
-/// Struttura per condividere il controller tra task embassy diversi
+/// Shared structure to pass the CYW43 controller between Embassy tasks
 #[derive(Clone, Copy)]
 pub struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static>>);
 
-/// Entry point principale secondo Embassy
+/// Main entry point for Embassy executor
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    // Parte il logger appropriato in base alla feature attiva
+    // Start appropriate logger based on active feature
     #[cfg(feature = "usb-logger")]
     {
         let driver = Driver::new(p.USB, UsbIrqs);
