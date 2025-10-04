@@ -7,7 +7,7 @@ mod utility;
 mod knx_client;
 
 use crate::utility::*;
-use crate::knx_client::{KnxClient, KnxEvent, KnxValue, format_group_address};
+use crate::knx_client::{KnxClient, KnxBuffers, KnxEvent, KnxValue, format_group_address};
 use cyw43::Control;
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::unwrap;
@@ -34,7 +34,6 @@ use defmt_rtt as _;
 
 // Network stack imports
 use embassy_net::{Config, StackResources};
-use embassy_net::udp::PacketMetadata;
 
 // KNX imports
 use knx_rs::addressing::GroupAddress;
@@ -207,26 +206,16 @@ async fn main(spawner: Spawner) {
     info!("Connecting to KNX gateway at {}.{}.{}.{}:{}",
           knx_gateway_ip[0], knx_gateway_ip[1], knx_gateway_ip[2], knx_gateway_ip[3], knx_gateway_port);
 
-    // Allocate buffers for AsyncTunnelClient
-    static RX_META: StaticCell<[PacketMetadata; 4]> = StaticCell::new();
-    static TX_META: StaticCell<[PacketMetadata; 4]> = StaticCell::new();
-    static RX_BUFFER: StaticCell<[u8; 2048]> = StaticCell::new();
-    static TX_BUFFER: StaticCell<[u8; 2048]> = StaticCell::new();
+    // Allocate buffers for KNX client using the new KnxBuffers struct
+    static KNX_BUFFERS: StaticCell<KnxBuffers> = StaticCell::new();
+    let knx_buffers = KNX_BUFFERS.init(KnxBuffers::new());
 
-    let rx_meta = RX_META.init([PacketMetadata::EMPTY; 4]);
-    let tx_meta = TX_META.init([PacketMetadata::EMPTY; 4]);
-    let rx_buffer = RX_BUFFER.init([0u8; 2048]);
-    let tx_buffer = TX_BUFFER.init([0u8; 2048]);
-
-    let mut client = KnxClient::new(
-        &stack,
-        rx_meta,
-        tx_meta,
-        rx_buffer,
-        tx_buffer,
-        knx_gateway_ip,
-        knx_gateway_port,
-    );
+    // Create KNX client using the builder pattern
+    let mut client = KnxClient::builder()
+        .gateway(knx_gateway_ip, knx_gateway_port)
+        .device_address([1, 1, 1])  // Device address 1.1.1
+        .build_with_buffers(&stack, knx_buffers)
+        .unwrap();
 
     // Connect to gateway
     info!("Attempting to connect...");

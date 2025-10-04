@@ -9,18 +9,15 @@
 //! use knx_rs::addressing::GroupAddress;
 //! use knx_client::{KnxClient, KnxValue};
 //!
-//! // Create client and connect
-//! let mut client = KnxClient::new(/* ... */);
+//! // Create client with builder pattern
+//! let mut client = KnxClient::builder()
+//!     .gateway([192, 168, 1, 10], 3671)
+//!     .device_address([1, 1, 1])
+//!     .build(&stack, &mut buffers)?;
+//!
+//! // Connect and use
 //! client.connect().await?;
-//!
-//! // Write a value
-//! let addr = GroupAddress::from(0x0A03); // 1/2/3
-//! client.write(addr, KnxValue::Bool(true)).await?;
-//!
-//! // Read events
-//! if let Some(event) = client.receive_event().await? {
-//!     // Handle event
-//! }
+//! client.write(GroupAddress::from(0x0A03), KnxValue::Bool(true)).await?;
 //! ```
 
 use embassy_net::udp::PacketMetadata;
@@ -31,6 +28,14 @@ use knx_rs::protocol::constants::CEMIMessageCode;
 
 /// Default device individual address (1.1.1).
 const DEVICE_ADDRESS_RAW: u16 = 0x1101;
+
+/// Default KNXnet/IP port.
+const DEFAULT_KNXNET_PORT: u16 = 3671;
+
+/// Default buffer sizes for UDP communication.
+const DEFAULT_RX_BUFFER_SIZE: usize = 2048;
+const DEFAULT_TX_BUFFER_SIZE: usize = 2048;
+const DEFAULT_METADATA_COUNT: usize = 4;
 
 /// KNX value types representing different Datapoint Types (DPT).
 ///
@@ -91,16 +96,263 @@ pub enum KnxEvent {
     },
 }
 
+/// Buffer storage for KNX client.
+///
+/// This struct holds all the buffers needed for UDP communication.
+/// Use this with [`KnxClientBuilder::build_with_buffers`].
+pub struct KnxBuffers {
+    /// Receive packet metadata
+    pub rx_meta: [PacketMetadata; DEFAULT_METADATA_COUNT],
+    /// Transmit packet metadata
+    pub tx_meta: [PacketMetadata; DEFAULT_METADATA_COUNT],
+    /// Receive data buffer
+    pub rx_buffer: [u8; DEFAULT_RX_BUFFER_SIZE],
+    /// Transmit data buffer
+    pub tx_buffer: [u8; DEFAULT_TX_BUFFER_SIZE],
+}
+
+impl KnxBuffers {
+    /// Creates a new buffer storage with default sizes.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let mut buffers = KnxBuffers::new();
+    /// let client = KnxClient::builder()
+    ///     .gateway([192, 168, 1, 10], 3671)
+    ///     .build_with_buffers(&stack, &mut buffers)?;
+    /// ```
+    pub const fn new() -> Self {
+        Self {
+            rx_meta: [PacketMetadata::EMPTY; DEFAULT_METADATA_COUNT],
+            tx_meta: [PacketMetadata::EMPTY; DEFAULT_METADATA_COUNT],
+            rx_buffer: [0u8; DEFAULT_RX_BUFFER_SIZE],
+            tx_buffer: [0u8; DEFAULT_TX_BUFFER_SIZE],
+        }
+    }
+}
+
+impl Default for KnxBuffers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Builder for configuring and creating a [`KnxClient`].
+///
+/// # Example
+///
+/// ```no_run
+/// use knx_client::{KnxClient, KnxBuffers};
+///
+/// let mut buffers = KnxBuffers::new();
+/// let mut client = KnxClient::builder()
+///     .gateway([192, 168, 1, 10], 3671)
+///     .device_address([1, 1, 1])
+///     .build_with_buffers(&stack, &mut buffers)?;
+///
+/// client.connect().await?;
+/// ```
+pub struct KnxClientBuilder {
+    gateway_ip: [u8; 4],
+    gateway_port: u16,
+    device_address: u16,
+}
+
+impl KnxClientBuilder {
+    /// Creates a new builder with default values.
+    ///
+    /// Default configuration:
+    /// - Gateway: `[192, 168, 1, 10]:3671`
+    /// - Device address: `1.1.1`
+    fn new() -> Self {
+        Self {
+            gateway_ip: [192, 168, 1, 10],
+            gateway_port: DEFAULT_KNXNET_PORT,
+            device_address: DEVICE_ADDRESS_RAW,
+        }
+    }
+
+    /// Sets the KNX gateway IP address and port.
+    ///
+    /// # Arguments
+    ///
+    /// * `ip` - Gateway IP address as `[u8; 4]` (e.g., `[192, 168, 1, 10]`)
+    /// * `port` - Gateway port (typically 3671)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let builder = KnxClient::builder()
+    ///     .gateway([192, 168, 1, 10], 3671);
+    /// ```
+    pub fn gateway(mut self, ip: [u8; 4], port: u16) -> Self {
+        self.gateway_ip = ip;
+        self.gateway_port = port;
+        self
+    }
+
+    /// Sets the device individual address.
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - Device address as `[area, line, device]`
+    ///   For example: `[1, 1, 1]` represents address `1.1.1`
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let builder = KnxClient::builder()
+    ///     .device_address([1, 1, 250]);  // 1.1.250
+    /// ```
+    pub fn device_address(mut self, address: [u8; 3]) -> Self {
+        let [area, line, device] = address;
+        self.device_address = ((area as u16) << 12) | ((line as u16) << 8) | (device as u16);
+        self
+    }
+
+    /// Builds the [`KnxClient`] using provided buffers.
+    ///
+    /// This method gives you control over buffer allocation.
+    ///
+    /// # Arguments
+    ///
+    /// * `stack` - Embassy network stack reference
+    /// * `buffers` - Mutable reference to [`KnxBuffers`]
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let mut buffers = KnxBuffers::new();
+    /// let client = KnxClient::builder()
+    ///     .gateway([192, 168, 1, 10], 3671)
+    ///     .build_with_buffers(&stack, &mut buffers)?;
+    /// ```
+    pub fn build_with_buffers<'a>(
+        self,
+        stack: &'a embassy_net::Stack<'static>,
+        buffers: &'a mut KnxBuffers,
+    ) -> Result<KnxClient<'a>, ()> {
+        Ok(KnxClient::new_with_device(
+            stack,
+            &mut buffers.rx_meta,
+            &mut buffers.tx_meta,
+            &mut buffers.rx_buffer,
+            &mut buffers.tx_buffer,
+            self.gateway_ip,
+            self.gateway_port,
+            self.device_address,
+        ))
+    }
+
+    /// Builds the [`KnxClient`] using custom buffers.
+    ///
+    /// This is a lower-level method for advanced users who want full control
+    /// over buffer sizes and allocation.
+    ///
+    /// # Arguments
+    ///
+    /// * `stack` - Embassy network stack reference
+    /// * `rx_meta` - Receive packet metadata buffer (minimum 4 entries)
+    /// * `tx_meta` - Transmit packet metadata buffer (minimum 4 entries)
+    /// * `rx_buffer` - Receive data buffer (recommended 2048 bytes)
+    /// * `tx_buffer` - Transmit data buffer (recommended 2048 bytes)
+    pub fn build<'a>(
+        self,
+        stack: &'a embassy_net::Stack<'static>,
+        rx_meta: &'a mut [PacketMetadata],
+        tx_meta: &'a mut [PacketMetadata],
+        rx_buffer: &'a mut [u8],
+        tx_buffer: &'a mut [u8],
+    ) -> Result<KnxClient<'a>, ()> {
+        Ok(KnxClient::new_with_device(
+            stack,
+            rx_meta,
+            tx_meta,
+            rx_buffer,
+            tx_buffer,
+            self.gateway_ip,
+            self.gateway_port,
+            self.device_address,
+        ))
+    }
+}
+
 /// High-level KNX client for tunneling operations.
 ///
 /// Provides a simplified async API for KNX operations including
 /// write, read, respond, and event receiving.
+///
+/// # Creating a Client
+///
+/// Use the builder pattern for easy configuration:
+///
+/// ```no_run
+/// use knx_client::{KnxClient, KnxBuffers};
+///
+/// let mut buffers = KnxBuffers::new();
+/// let mut client = KnxClient::builder()
+///     .gateway([192, 168, 1, 10], 3671)
+///     .device_address([1, 1, 1])
+///     .build_with_buffers(&stack, &mut buffers)?;
+/// ```
 pub struct KnxClient<'a> {
     tunnel: AsyncTunnelClient<'a>,
+    device_address: u16,
 }
 
 impl<'a> KnxClient<'a> {
+    /// Creates a builder for configuring a new KNX client.
+    ///
+    /// This is the recommended way to create a [`KnxClient`].
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use knx_client::{KnxClient, KnxBuffers};
+    ///
+    /// let mut buffers = KnxBuffers::new();
+    /// let mut client = KnxClient::builder()
+    ///     .gateway([192, 168, 1, 10], 3671)
+    ///     .device_address([1, 1, 1])
+    ///     .build_with_buffers(&stack, &mut buffers)?;
+    /// ```
+    pub fn builder() -> KnxClientBuilder {
+        KnxClientBuilder::new()
+    }
+
+    /// Creates a new KNX client instance with custom device address.
+    ///
+    /// Internal method used by the builder. Prefer using [`KnxClient::builder()`].
+    fn new_with_device(
+        stack: &'a embassy_net::Stack<'static>,
+        rx_meta: &'a mut [PacketMetadata],
+        tx_meta: &'a mut [PacketMetadata],
+        rx_buffer: &'a mut [u8],
+        tx_buffer: &'a mut [u8],
+        gateway_ip: [u8; 4],
+        gateway_port: u16,
+        device_address: u16,
+    ) -> Self {
+        let tunnel = AsyncTunnelClient::new(
+            stack,
+            rx_meta,
+            tx_meta,
+            rx_buffer,
+            tx_buffer,
+            gateway_ip,
+            gateway_port,
+        );
+
+        Self {
+            tunnel,
+            device_address,
+        }
+    }
+
     /// Creates a new KNX client instance.
+    ///
+    /// **Note:** Consider using [`KnxClient::builder()`] for a more ergonomic API.
     ///
     /// # Arguments
     ///
@@ -124,7 +376,7 @@ impl<'a> KnxClient<'a> {
         gateway_ip: [u8; 4],
         gateway_port: u16,
     ) -> Self {
-        let tunnel = AsyncTunnelClient::new(
+        Self::new_with_device(
             stack,
             rx_meta,
             tx_meta,
@@ -132,9 +384,8 @@ impl<'a> KnxClient<'a> {
             tx_buffer,
             gateway_ip,
             gateway_port,
-        );
-
-        Self { tunnel }
+            DEVICE_ADDRESS_RAW,
+        )
     }
 
     /// Establishes connection to the KNX gateway.
@@ -160,7 +411,7 @@ impl<'a> KnxClient<'a> {
     /// Returns `Err(())` if the write operation fails.
     pub async fn write(&mut self, address: GroupAddress, value: KnxValue) -> Result<(), ()> {
         let mut buffer = [0u8; 16];
-        let len = build_group_write(address, value, &mut buffer);
+        let len = build_group_write(address, value, self.device_address, &mut buffer);
         self.tunnel.send_cemi(&buffer[..len]).await.map_err(|_| ())
     }
 
@@ -176,7 +427,7 @@ impl<'a> KnxClient<'a> {
     ///
     /// Returns `Err(())` if the read request fails.
     pub async fn read(&mut self, address: GroupAddress) -> Result<(), ()> {
-        let cemi = build_group_read(address);
+        let cemi = build_group_read(address, self.device_address);
         self.tunnel.send_cemi(&cemi).await.map_err(|_| ())
     }
 
@@ -194,7 +445,7 @@ impl<'a> KnxClient<'a> {
     /// Returns `Err(())` if the response operation fails.
     pub async fn respond(&mut self, address: GroupAddress, value: KnxValue) -> Result<(), ()> {
         let mut buffer = [0u8; 16];
-        let len = build_group_response(address, value, &mut buffer);
+        let len = build_group_response(address, value, self.device_address, &mut buffer);
         self.tunnel.send_cemi(&buffer[..len]).await.map_err(|_| ())
     }
 
@@ -274,13 +525,19 @@ impl<'a> KnxClient<'a> {
 ///
 /// * `group_addr` - Destination group address
 /// * `value` - Value to encode
+/// * `device_address` - Source device address (raw u16)
 /// * `buffer` - Output buffer (minimum 16 bytes)
 ///
 /// # Returns
 ///
 /// Total frame length in bytes.
-fn build_group_write(group_addr: GroupAddress, value: KnxValue, buffer: &mut [u8]) -> usize {
-    let device_addr = IndividualAddress::from(DEVICE_ADDRESS_RAW);
+fn build_group_write(
+    group_addr: GroupAddress,
+    value: KnxValue,
+    device_address: u16,
+    buffer: &mut [u8],
+) -> usize {
+    let device_addr = IndividualAddress::from(device_address);
 
     buffer[0] = CEMIMessageCode::LDataReq.to_u8();
     buffer[1] = 0x00; // Additional info length
@@ -309,13 +566,19 @@ fn build_group_write(group_addr: GroupAddress, value: KnxValue, buffer: &mut [u8
 ///
 /// * `group_addr` - Destination group address
 /// * `value` - Value to encode
+/// * `device_address` - Source device address (raw u16)
 /// * `buffer` - Output buffer (minimum 16 bytes)
 ///
 /// # Returns
 ///
 /// Total frame length in bytes.
-fn build_group_response(group_addr: GroupAddress, value: KnxValue, buffer: &mut [u8]) -> usize {
-    let device_addr = IndividualAddress::from(DEVICE_ADDRESS_RAW);
+fn build_group_response(
+    group_addr: GroupAddress,
+    value: KnxValue,
+    device_address: u16,
+    buffer: &mut [u8],
+) -> usize {
+    let device_addr = IndividualAddress::from(device_address);
 
     buffer[0] = CEMIMessageCode::LDataReq.to_u8();
     buffer[1] = 0x00;
@@ -343,13 +606,14 @@ fn build_group_response(group_addr: GroupAddress, value: KnxValue, buffer: &mut 
 /// # Arguments
 ///
 /// * `group_addr` - Group address to query
+/// * `device_address` - Source device address (raw u16)
 ///
 /// # Returns
 ///
 /// Fixed-size 11-byte cEMI frame.
-fn build_group_read(group_addr: GroupAddress) -> [u8; 11] {
+fn build_group_read(group_addr: GroupAddress, device_address: u16) -> [u8; 11] {
     let mut frame = [0u8; 11];
-    let device_addr = IndividualAddress::from(DEVICE_ADDRESS_RAW);
+    let device_addr = IndividualAddress::from(device_address);
 
     frame[0] = CEMIMessageCode::LDataReq.to_u8();
     frame[1] = 0x00;
