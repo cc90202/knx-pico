@@ -13,15 +13,17 @@
 //! let mut client = KnxClient::builder()
 //!     .gateway([192, 168, 1, 10], 3671)
 //!     .device_address([1, 1, 1])
-//!     .build(&stack, &mut buffers)?;
+//!     .build_with_buffers(&stack, &mut buffers)?;
 //!
 //! // Connect and use
 //! client.connect().await?;
 //! client.write(GroupAddress::from(0x0A03), KnxValue::Bool(true)).await?;
 //! ```
 
+use core::fmt;
 use embassy_net::udp::PacketMetadata;
 use knx_rs::addressing::{GroupAddress, IndividualAddress};
+use knx_rs::error::KnxError;
 use knx_rs::protocol::async_tunnel::AsyncTunnelClient;
 use knx_rs::protocol::cemi::{ControlField1, ControlField2};
 use knx_rs::protocol::constants::CEMIMessageCode;
@@ -36,6 +38,102 @@ const DEFAULT_KNXNET_PORT: u16 = 3671;
 const DEFAULT_RX_BUFFER_SIZE: usize = 2048;
 const DEFAULT_TX_BUFFER_SIZE: usize = 2048;
 const DEFAULT_METADATA_COUNT: usize = 4;
+
+/// Result type for KNX client operations.
+pub type Result<T> = core::result::Result<T, KnxClientError>;
+
+/// Errors that can occur during KNX client operations.
+///
+/// This enum provides detailed error information for all client operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum KnxClientError {
+    /// Client is not connected to the gateway.
+    ///
+    /// Call [`KnxClient::connect()`] before performing operations.
+    NotConnected,
+
+    /// Connection to the gateway failed.
+    ///
+    /// This can happen during initial connection or reconnection attempts.
+    ConnectionFailed(KnxError),
+
+    /// Failed to send data to the gateway.
+    ///
+    /// Network or protocol error during transmission.
+    SendFailed(KnxError),
+
+    /// Failed to receive data from the gateway.
+    ///
+    /// Network or protocol error during reception.
+    ReceiveFailed(KnxError),
+
+    /// Operation timed out.
+    ///
+    /// The requested operation did not complete within the expected time.
+    Timeout,
+
+    /// Invalid or malformed address.
+    InvalidAddress,
+
+    /// Protocol error occurred.
+    ///
+    /// The gateway or client violated the KNX protocol specification.
+    ProtocolError(KnxError),
+
+    /// Internal buffer error.
+    ///
+    /// Buffer too small or other buffer-related issue.
+    BufferError,
+
+    /// Unsupported operation.
+    ///
+    /// The requested operation is not supported by this client or gateway.
+    UnsupportedOperation,
+}
+
+impl fmt::Display for KnxClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotConnected => write!(f, "Not connected to KNX gateway"),
+            Self::ConnectionFailed(e) => write!(f, "Connection failed: {}", e),
+            Self::SendFailed(e) => write!(f, "Send failed: {}", e),
+            Self::ReceiveFailed(e) => write!(f, "Receive failed: {}", e),
+            Self::Timeout => write!(f, "Operation timed out"),
+            Self::InvalidAddress => write!(f, "Invalid address"),
+            Self::ProtocolError(e) => write!(f, "Protocol error: {}", e),
+            Self::BufferError => write!(f, "Buffer error"),
+            Self::UnsupportedOperation => write!(f, "Unsupported operation"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for KnxClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ConnectionFailed(e) | Self::SendFailed(e)
+            | Self::ReceiveFailed(e) | Self::ProtocolError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<KnxError> for KnxClientError {
+    fn from(err: KnxError) -> Self {
+        match err {
+            KnxError::ConnectionFailed
+            | KnxError::ConnectionRefused
+            | KnxError::ConnectionTimeout
+            | KnxError::ConnectionLost => Self::ConnectionFailed(err),
+            KnxError::SendFailed => Self::SendFailed(err),
+            KnxError::ReceiveFailed => Self::ReceiveFailed(err),
+            KnxError::Timeout => Self::Timeout,
+            KnxError::BufferTooSmall => Self::BufferError,
+            _ => Self::ProtocolError(err),
+        }
+    }
+}
 
 /// KNX value types representing different Datapoint Types (DPT).
 ///
@@ -232,7 +330,7 @@ impl KnxClientBuilder {
         self,
         stack: &'a embassy_net::Stack<'static>,
         buffers: &'a mut KnxBuffers,
-    ) -> Result<KnxClient<'a>, ()> {
+    ) -> Result<KnxClient<'a>> {
         Ok(KnxClient::new_with_device(
             stack,
             &mut buffers.rx_meta,
@@ -264,7 +362,7 @@ impl KnxClientBuilder {
         tx_meta: &'a mut [PacketMetadata],
         rx_buffer: &'a mut [u8],
         tx_buffer: &'a mut [u8],
-    ) -> Result<KnxClient<'a>, ()> {
+    ) -> Result<KnxClient<'a>> {
         Ok(KnxClient::new_with_device(
             stack,
             rx_meta,
@@ -394,9 +492,18 @@ impl<'a> KnxClient<'a> {
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if connection fails.
-    pub async fn connect(&mut self) -> Result<(), ()> {
-        self.tunnel.connect().await.map_err(|_| ())
+    /// Returns [`KnxClientError::ConnectionFailed`] if connection fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// match client.connect().await {
+    ///     Ok(()) => println!("Connected!"),
+    ///     Err(e) => eprintln!("Connection failed: {}", e),
+    /// }
+    /// ```
+    pub async fn connect(&mut self) -> Result<()> {
+        self.tunnel.connect().await.map_err(KnxClientError::from)
     }
 
     /// Writes a value to a group address (GroupValue_Write).
@@ -408,11 +515,24 @@ impl<'a> KnxClient<'a> {
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if the write operation fails.
-    pub async fn write(&mut self, address: GroupAddress, value: KnxValue) -> Result<(), ()> {
+    /// - [`KnxClientError::NotConnected`] - Client not connected
+    /// - [`KnxClientError::SendFailed`] - Failed to send telegram
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// client.write(
+    ///     GroupAddress::from(0x0A03),
+    ///     KnxValue::Bool(true)
+    /// ).await?;
+    /// ```
+    pub async fn write(&mut self, address: GroupAddress, value: KnxValue) -> Result<()> {
         let mut buffer = [0u8; 16];
         let len = build_group_write(address, value, self.device_address, &mut buffer);
-        self.tunnel.send_cemi(&buffer[..len]).await.map_err(|_| ())
+        self.tunnel
+            .send_cemi(&buffer[..len])
+            .await
+            .map_err(KnxClientError::from)
     }
 
     /// Requests to read a value from a group address (GroupValue_Read).
@@ -425,10 +545,20 @@ impl<'a> KnxClient<'a> {
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if the read request fails.
-    pub async fn read(&mut self, address: GroupAddress) -> Result<(), ()> {
+    /// - [`KnxClientError::NotConnected`] - Client not connected
+    /// - [`KnxClientError::SendFailed`] - Failed to send read request
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// // Request temperature value
+    /// client.read(GroupAddress::from(0x0A03)).await?;
+    ///
+    /// // Wait for response in receive_event()
+    /// ```
+    pub async fn read(&mut self, address: GroupAddress) -> Result<()> {
         let cemi = build_group_read(address, self.device_address);
-        self.tunnel.send_cemi(&cemi).await.map_err(|_| ())
+        self.tunnel.send_cemi(&cemi).await.map_err(KnxClientError::from)
     }
 
     /// Responds with a value to a group address (GroupValue_Response).
@@ -442,11 +572,27 @@ impl<'a> KnxClient<'a> {
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if the response operation fails.
-    pub async fn respond(&mut self, address: GroupAddress, value: KnxValue) -> Result<(), ()> {
+    /// - [`KnxClientError::NotConnected`] - Client not connected
+    /// - [`KnxClientError::SendFailed`] - Failed to send response
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// // Respond to a read request
+    /// match client.receive_event().await? {
+    ///     Some(KnxEvent::GroupRead { address }) => {
+    ///         client.respond(address, KnxValue::Temperature(21.5)).await?;
+    ///     }
+    ///     _ => {}
+    /// }
+    /// ```
+    pub async fn respond(&mut self, address: GroupAddress, value: KnxValue) -> Result<()> {
         let mut buffer = [0u8; 16];
         let len = build_group_response(address, value, self.device_address, &mut buffer);
-        self.tunnel.send_cemi(&buffer[..len]).await.map_err(|_| ())
+        self.tunnel
+            .send_cemi(&buffer[..len])
+            .await
+            .map_err(KnxClientError::from)
     }
 
     /// Sends a raw cEMI frame (for advanced usage).
@@ -457,9 +603,10 @@ impl<'a> KnxClient<'a> {
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if sending fails.
-    pub async fn send_raw_cemi(&mut self, cemi: &[u8]) -> Result<(), ()> {
-        self.tunnel.send_cemi(cemi).await.map_err(|_| ())
+    /// - [`KnxClientError::NotConnected`] - Client not connected
+    /// - [`KnxClientError::SendFailed`] - Failed to send frame
+    pub async fn send_raw_cemi(&mut self, cemi: &[u8]) -> Result<()> {
+        self.tunnel.send_cemi(cemi).await.map_err(KnxClientError::from)
     }
 
     /// Waits for and parses the next KNX bus event.
@@ -470,8 +617,32 @@ impl<'a> KnxClient<'a> {
     ///
     /// * `Ok(Some(event))` - Parsed KNX event
     /// * `Ok(None)` - Timeout, no data available
-    /// * `Err(())` - Receive error
-    pub async fn receive_event(&mut self) -> Result<Option<KnxEvent>, ()> {
+    ///
+    /// # Errors
+    ///
+    /// - [`KnxClientError::NotConnected`] - Client not connected
+    /// - [`KnxClientError::ReceiveFailed`] - Failed to receive data
+    /// - [`KnxClientError::ProtocolError`] - Invalid or malformed frame
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// loop {
+    ///     match client.receive_event().await? {
+    ///         Some(KnxEvent::GroupWrite { address, value }) => {
+    ///             println!("Received write to {}: {:?}", address, value);
+    ///         }
+    ///         Some(KnxEvent::GroupRead { address }) => {
+    ///             println!("Received read request for {}", address);
+    ///         }
+    ///         None => {
+    ///             // Timeout, no data
+    ///         }
+    ///         _ => {}
+    ///     }
+    /// }
+    /// ```
+    pub async fn receive_event(&mut self) -> Result<Option<KnxEvent>> {
         match self.tunnel.receive().await {
             Ok(Some(cemi_data)) => {
                 if let Ok(cemi) = knx_rs::protocol::cemi::CEMIFrame::parse(cemi_data) {
@@ -514,7 +685,7 @@ impl<'a> KnxClient<'a> {
                 Ok(None)
             }
             Ok(None) => Ok(None),
-            Err(_) => Err(()),
+            Err(e) => Err(KnxClientError::from(e)),
         }
     }
 }
