@@ -22,6 +22,7 @@
 
 use core::fmt;
 use embassy_net::udp::PacketMetadata;
+use heapless::index_map::FnvIndexMap;
 use knx_rs::addressing::{GroupAddress, IndividualAddress};
 use knx_rs::error::KnxError;
 use knx_rs::protocol::async_tunnel::AsyncTunnelClient;
@@ -38,6 +39,9 @@ const DEFAULT_KNXNET_PORT: u16 = 3671;
 const DEFAULT_RX_BUFFER_SIZE: usize = 2048;
 const DEFAULT_TX_BUFFER_SIZE: usize = 2048;
 const DEFAULT_METADATA_COUNT: usize = 4;
+
+/// Maximum number of group addresses in DPT registry.
+const MAX_DPT_REGISTRY_SIZE: usize = 32;
 
 /// Result type for KNX client operations.
 pub type Result<T> = core::result::Result<T, KnxClientError>;
@@ -131,6 +135,67 @@ impl From<KnxError> for KnxClientError {
             KnxError::Timeout => Self::Timeout,
             KnxError::BufferTooSmall => Self::BufferError,
             _ => Self::ProtocolError(err),
+        }
+    }
+}
+
+/// Datapoint Type specification for group addresses.
+///
+/// Used in the DPT registry to define how values should be decoded
+/// for specific group addresses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum DptType {
+    /// DPT 1.xxx - Boolean (switch, button, etc.)
+    Bool,
+    /// DPT 5.001 - Percentage (0-100%)
+    Percent,
+    /// DPT 5.010 - Unsigned 8-bit (0-255)
+    U8,
+    /// DPT 7.001 - Unsigned 16-bit (0-65535)
+    U16,
+    /// DPT 9.001 - Temperature in Celsius
+    Temperature,
+    /// DPT 9.004 - Illuminance in lux
+    Lux,
+    /// DPT 9.007 - Humidity percentage
+    Humidity,
+    /// DPT 9.008 - Air quality in ppm
+    Ppm,
+    /// DPT 9.xxx - Generic 2-byte float
+    Float2,
+}
+
+impl DptType {
+    /// Returns a human-readable name for this DPT type.
+    pub const fn name(&self) -> &'static str {
+        match self {
+            DptType::Bool => "Boolean (DPT 1.xxx)",
+            DptType::Percent => "Percentage (DPT 5.001)",
+            DptType::U8 => "Unsigned 8-bit (DPT 5.010)",
+            DptType::U16 => "Unsigned 16-bit (DPT 7.001)",
+            DptType::Temperature => "Temperature (DPT 9.001)",
+            DptType::Lux => "Illuminance (DPT 9.004)",
+            DptType::Humidity => "Humidity (DPT 9.007)",
+            DptType::Ppm => "Air Quality (DPT 9.008)",
+            DptType::Float2 => "Generic Float (DPT 9.xxx)",
+        }
+    }
+
+    /// Converts a decoded raw value into a typed [`KnxValue`] based on this DPT.
+    fn apply_to_value(&self, raw_value: KnxValue) -> KnxValue {
+        match (self, raw_value) {
+            (DptType::Bool, KnxValue::Bool(v)) => KnxValue::Bool(v),
+            (DptType::Percent, KnxValue::U8(v)) => KnxValue::Percent(v.min(100)),
+            (DptType::U8, KnxValue::U8(v)) => KnxValue::U8(v),
+            (DptType::U16, KnxValue::U16(v)) => KnxValue::U16(v),
+            (DptType::Temperature, KnxValue::Float2(v)) => KnxValue::Temperature(v),
+            (DptType::Lux, KnxValue::Float2(v)) => KnxValue::Lux(v),
+            (DptType::Humidity, KnxValue::Float2(v)) => KnxValue::Humidity(v),
+            (DptType::Ppm, KnxValue::Float2(v)) => KnxValue::Ppm(v),
+            (DptType::Float2, KnxValue::Float2(v)) => KnxValue::Float2(v),
+            // Fallback: return the raw value if types don't match
+            _ => raw_value,
         }
     }
 }
@@ -397,6 +462,8 @@ impl KnxClientBuilder {
 pub struct KnxClient<'a> {
     tunnel: AsyncTunnelClient<'a>,
     device_address: u16,
+    /// DPT registry mapping group addresses to their datapoint types
+    dpt_registry: FnvIndexMap<u16, DptType, MAX_DPT_REGISTRY_SIZE>,
 }
 
 impl<'a> KnxClient<'a> {
@@ -445,6 +512,7 @@ impl<'a> KnxClient<'a> {
         Self {
             tunnel,
             device_address,
+            dpt_registry: FnvIndexMap::new(),
         }
     }
 
@@ -484,6 +552,76 @@ impl<'a> KnxClient<'a> {
             gateway_port,
             DEVICE_ADDRESS_RAW,
         )
+    }
+
+    /// Registers a datapoint type for a specific group address.
+    ///
+    /// This allows automatic type conversion when receiving events for this address.
+    /// Registered addresses will have their values decoded according to the DPT type.
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - Group address to register
+    /// * `dpt_type` - Datapoint type specification
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Registration successful
+    /// * `Err(KnxClientError::BufferError)` - Registry is full (max 32 addresses)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// // Register address 1/2/3 as a temperature sensor
+    /// client.register_dpt(
+    ///     GroupAddress::from(0x0A03),
+    ///     DptType::Temperature
+    /// )?;
+    ///
+    /// // Register address 1/2/4 as a light switch
+    /// client.register_dpt(
+    ///     GroupAddress::from(0x0A04),
+    ///     DptType::Bool
+    /// )?;
+    ///
+    /// // Now receive_event() will automatically apply the correct types
+    /// ```
+    pub fn register_dpt(&mut self, address: GroupAddress, dpt_type: DptType) -> Result<()> {
+        let addr_raw: u16 = address.into();
+        self.dpt_registry
+            .insert(addr_raw, dpt_type)
+            .map_err(|_| KnxClientError::BufferError)?;
+        Ok(())
+    }
+
+    /// Looks up the registered DPT type for a group address.
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - Group address to look up
+    ///
+    /// # Returns
+    ///
+    /// * `Some(DptType)` - Registered DPT type for this address
+    /// * `None` - Address not registered
+    pub fn lookup_dpt(&self, address: GroupAddress) -> Option<DptType> {
+        let addr_raw: u16 = address.into();
+        self.dpt_registry.get(&addr_raw).copied()
+    }
+
+    /// Clears all registered DPT mappings.
+    pub fn clear_dpt_registry(&mut self) {
+        self.dpt_registry.clear();
+    }
+
+    /// Returns the number of registered DPT mappings.
+    pub fn dpt_registry_len(&self) -> usize {
+        self.dpt_registry.len()
+    }
+
+    /// Returns whether the DPT registry is empty.
+    pub fn dpt_registry_is_empty(&self) -> bool {
+        self.dpt_registry.is_empty()
     }
 
     /// Establishes connection to the KNX gateway.
@@ -653,9 +791,16 @@ impl<'a> KnxClient<'a> {
 
                                 if apci == 0x80 {
                                     if let Some(value) = decode_value(ldata.data) {
+                                        // Apply DPT type from registry if registered
+                                        let typed_value = if let Some(dpt_type) = self.lookup_dpt(dest) {
+                                            dpt_type.apply_to_value(value)
+                                        } else {
+                                            value
+                                        };
+
                                         return Ok(Some(KnxEvent::GroupWrite {
                                             address: dest,
-                                            value,
+                                            value: typed_value,
                                         }));
                                     } else {
                                         return Ok(Some(KnxEvent::Unknown {
@@ -665,9 +810,16 @@ impl<'a> KnxClient<'a> {
                                     }
                                 } else if apci == 0x40 {
                                     if let Some(value) = decode_value(ldata.data) {
+                                        // Apply DPT type from registry if registered
+                                        let typed_value = if let Some(dpt_type) = self.lookup_dpt(dest) {
+                                            dpt_type.apply_to_value(value)
+                                        } else {
+                                            value
+                                        };
+
                                         return Ok(Some(KnxEvent::GroupResponse {
                                             address: dest,
-                                            value,
+                                            value: typed_value,
                                         }));
                                     } else {
                                         return Ok(Some(KnxEvent::Unknown {
