@@ -232,6 +232,14 @@ async fn main(spawner: Spawner) {
     // Test: Send boolean commands to group address 1/2/3
     let light_addr = GroupAddress::from(0x0A03); // 1/2/3
 
+    // Note: You can also use the ga! macro from knx_rs for cleaner syntax:
+    // use knx_rs::ga;
+    // let light_addr = ga!(1/2/3);
+    //
+    // Or use knx_write! macro for inline addresses:
+    // use knx_rs::{knx_write, KnxValue};
+    // knx_write!(client, 1/2/3, KnxValue::Bool(true)).await?;
+
     info!("Sending test: bool=true to 1/2/3");
     match client.write(light_addr, KnxValue::Bool(true)).await {
         Ok(_) => info!("✓ Command sent successfully"),

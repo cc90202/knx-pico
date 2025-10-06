@@ -32,6 +32,10 @@ pub mod dpt;
 pub mod error;
 pub mod protocol;
 
+// Macro module (must be declared before use)
+#[macro_use]
+pub mod macros;
+
 // Re-export commonly used types
 pub use addressing::{GroupAddress, IndividualAddress};
 pub use dpt::{Dpt1, Dpt5, Dpt9, DptDecode, DptEncode};
