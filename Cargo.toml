@@ -104,16 +104,20 @@ embassy-rp-usb = [
 ]
 
 [profile.release]
-# Enable generation of debug symbols even on release builds
-debug = true
-# Optimize for speed
-opt-level = 3
-# Enable Link-Time Optimization for better inlining across crates
-lto = "thin"
-# Keep less code size optimization in favor of speed
+# Optimize for size instead of speed (z = aggressive size optimization)
+opt-level = "z"
+# Enable full Link-Time Optimization for maximum size reduction
+lto = "fat"
+# Single codegen unit for better optimization (slower compile, smaller binary)
 codegen-units = 1
+# Strip symbols from binary
+strip = true
+# No debug info in release (saves ~2-3 MB)
+debug = false
 # Panic = abort for smaller binary and faster unwinding
 panic = "abort"
+# Disable overflow checks for smaller size (use with caution!)
+overflow-checks = false
 
 [profile.dev]
 # Even in debug, optimize a bit for usable performance
