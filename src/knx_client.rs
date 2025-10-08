@@ -148,6 +148,10 @@ impl From<KnxError> for KnxClientError {
 pub enum DptType {
     /// DPT 1.xxx - Boolean (switch, button, etc.)
     Bool,
+    /// DPT 3.007 - Dimming control (increase/decrease, step size)
+    Dimming,
+    /// DPT 3.008 - Blinds control (up/down, step size)
+    Blinds,
     /// DPT 5.001 - Percentage (0-100%)
     Percent,
     /// DPT 5.010 - Unsigned 8-bit (0-255)
@@ -171,6 +175,8 @@ impl DptType {
     pub const fn name(&self) -> &'static str {
         match self {
             DptType::Bool => "Boolean (DPT 1.xxx)",
+            DptType::Dimming => "Dimming Control (DPT 3.007)",
+            DptType::Blinds => "Blinds Control (DPT 3.008)",
             DptType::Percent => "Percentage (DPT 5.001)",
             DptType::U8 => "Unsigned 8-bit (DPT 5.010)",
             DptType::U16 => "Unsigned 16-bit (DPT 7.001)",
@@ -186,6 +192,17 @@ impl DptType {
     fn apply_to_value(&self, raw_value: KnxValue) -> KnxValue {
         match (self, raw_value) {
             (DptType::Bool, KnxValue::Bool(v)) => KnxValue::Bool(v),
+            // DPT 3.xxx: Convert U8 to Control3Bit
+            (DptType::Dimming, KnxValue::U8(v)) | (DptType::Blinds, KnxValue::U8(v)) => {
+                let control = (v & 0x08) != 0; // Bit 3
+                let step = v & 0x07; // Bits 2-0
+                KnxValue::Control3Bit { control, step }
+            }
+            // DPT 3.xxx: Already decoded
+            (DptType::Dimming, KnxValue::Control3Bit { control, step })
+            | (DptType::Blinds, KnxValue::Control3Bit { control, step }) => {
+                KnxValue::Control3Bit { control, step }
+            }
             (DptType::Percent, KnxValue::U8(v)) => KnxValue::Percent(v.min(100)),
             (DptType::U8, KnxValue::U8(v)) => KnxValue::U8(v),
             (DptType::U16, KnxValue::U16(v)) => KnxValue::U16(v),
@@ -208,6 +225,17 @@ impl DptType {
 pub enum KnxValue {
     /// Boolean value (DPT 1.xxx) - switch, enable/disable
     Bool(bool),
+    /// 3-bit controlled value (DPT 3.xxx) - dimming, blinds
+    ///
+    /// Format: 1 byte with control bit and step code
+    /// - `control`: Direction (false = decrease/up, true = increase/down)
+    /// - `step`: Step code (0 = break/stop, 1-7 = step sizes)
+    Control3Bit {
+        /// Control direction: false = decrease/up, true = increase/down
+        control: bool,
+        /// Step code: 0 = break, 1-7 = step size
+        step: u8,
+    },
     /// Percentage value (DPT 5.001) - 0-100%
     Percent(u8),
     /// Unsigned 8-bit value (DPT 5.010) - 0-255
@@ -1002,6 +1030,22 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
             buffer[2] = apci | if b { 0x01 } else { 0x00 };
             11
         }
+        KnxValue::Control3Bit { control, step } => {
+            // DPT 3.xxx: 1 byte encoding
+            // Bit 3: control (0 = decrease/up, 1 = increase/down)
+            // Bits 2-0: step code (0-7)
+            let step = step.min(7); // Clamp to 0-7
+            let value = if control {
+                0x08 | step // Set bit 3 for increase/down
+            } else {
+                step // Clear bit 3 for decrease/up
+            };
+            buffer[0] = 0x02; // NPDU length
+            buffer[1] = 0x00; // TPCI
+            buffer[2] = apci;
+            buffer[3] = value;
+            12
+        }
         KnxValue::Percent(p) => {
             let value = ((p.min(100) as u16 * 255) / 100) as u8;
             buffer[0] = 0x02;
@@ -1075,11 +1119,11 @@ fn encode_dpt9(value: f32) -> u16 {
 /// # Note
 ///
 /// Cannot distinguish between variants with the same encoding:
-/// - 1-byte data: Returns [`KnxValue::U8`] (could also be `Percent`)
+/// - 1-byte data: Returns [`KnxValue::U8`] (could also be `Percent` or `Control3Bit`)
 /// - 2-byte unsigned: Returns [`KnxValue::U16`]
 /// - 2-byte float: Returns [`KnxValue::Float2`] (could be `Temperature`, `Lux`, etc.)
 ///
-/// Application should interpret based on group address context.
+/// Application should interpret based on group address context using DPT registry.
 ///
 /// # Arguments
 ///
@@ -1156,4 +1200,145 @@ pub fn format_group_address(addr: GroupAddress) -> (u8, u8, u8) {
     let middle = ((raw >> 8) & 0x07) as u8;
     let sub = (raw & 0xFF) as u8;
     (main, middle, sub)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ====== DPT 3.xxx (Control3Bit) Tests ======
+
+    #[test]
+    fn test_dpt3_encode_decrease_break() {
+        // DPT 3.xxx: decrease/up, break (step = 0)
+        let value = KnxValue::Control3Bit { control: false, step: 0 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 12);
+        assert_eq!(buffer[0], 0x02); // NPDU length
+        assert_eq!(buffer[1], 0x00); // TPCI
+        assert_eq!(buffer[2], 0x80); // APCI (write)
+        assert_eq!(buffer[3], 0x00); // control=0, step=0
+    }
+
+    #[test]
+    fn test_dpt3_encode_increase_step_5() {
+        // DPT 3.xxx: increase/down, step = 5
+        let value = KnxValue::Control3Bit { control: true, step: 5 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 12);
+        assert_eq!(buffer[0], 0x02);
+        assert_eq!(buffer[1], 0x00);
+        assert_eq!(buffer[2], 0x80);
+        assert_eq!(buffer[3], 0x0D); // 0x08 (control=1) | 0x05 (step=5) = 0x0D
+    }
+
+    #[test]
+    fn test_dpt3_encode_step_clamping() {
+        // Test that step > 7 gets clamped to 7
+        let value = KnxValue::Control3Bit { control: false, step: 15 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 12);
+        assert_eq!(buffer[3], 0x07); // Should be clamped to 7
+    }
+
+    #[test]
+    fn test_dpt3_decode_from_u8() {
+        // Test decoding via DPT registry
+        let raw_u8 = KnxValue::U8(0x0D); // control=1, step=5
+
+        // Apply Dimming DPT type
+        let dimming_value = DptType::Dimming.apply_to_value(raw_u8);
+        assert_eq!(dimming_value, KnxValue::Control3Bit { control: true, step: 5 });
+
+        // Apply Blinds DPT type
+        let blinds_value = DptType::Blinds.apply_to_value(raw_u8);
+        assert_eq!(blinds_value, KnxValue::Control3Bit { control: true, step: 5 });
+    }
+
+    #[test]
+    fn test_dpt3_decode_decrease_break() {
+        let raw_u8 = KnxValue::U8(0x00); // control=0, step=0
+        let value = DptType::Dimming.apply_to_value(raw_u8);
+        assert_eq!(value, KnxValue::Control3Bit { control: false, step: 0 });
+    }
+
+    #[test]
+    fn test_dpt3_all_step_values() {
+        // Test all valid step values (0-7)
+        for step in 0..=7 {
+            for control in [false, true] {
+                let expected_byte = if control {
+                    0x08 | step
+                } else {
+                    step
+                };
+
+                let raw_u8 = KnxValue::U8(expected_byte);
+                let decoded = DptType::Dimming.apply_to_value(raw_u8);
+                assert_eq!(decoded, KnxValue::Control3Bit { control, step });
+            }
+        }
+    }
+
+    #[test]
+    fn test_dpt3_roundtrip() {
+        // Test encode -> decode roundtrip
+        let original = KnxValue::Control3Bit { control: true, step: 3 };
+
+        // Encode
+        let mut buffer = [0u8; 16];
+        encode_value_with_apci(original, &mut buffer, 0x80);
+
+        // Decode (simulated by extracting the encoded byte)
+        let encoded_byte = buffer[3];
+        let raw_u8 = KnxValue::U8(encoded_byte);
+        let decoded = DptType::Dimming.apply_to_value(raw_u8);
+
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_dpt3_type_names() {
+        assert_eq!(DptType::Dimming.name(), "Dimming Control (DPT 3.007)");
+        assert_eq!(DptType::Blinds.name(), "Blinds Control (DPT 3.008)");
+    }
+
+    #[test]
+    fn test_dpt3_already_decoded_passthrough() {
+        // Test that already-decoded Control3Bit values pass through unchanged
+        let value = KnxValue::Control3Bit { control: false, step: 7 };
+
+        let dimming_value = DptType::Dimming.apply_to_value(value);
+        assert_eq!(dimming_value, value);
+
+        let blinds_value = DptType::Blinds.apply_to_value(value);
+        assert_eq!(blinds_value, value);
+    }
+
+    // ====== Integration Tests ======
+
+    #[test]
+    fn test_control3bit_equality() {
+        let a = KnxValue::Control3Bit { control: true, step: 5 };
+        let b = KnxValue::Control3Bit { control: true, step: 5 };
+        let c = KnxValue::Control3Bit { control: false, step: 5 };
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_control3bit_debug_format() {
+        let value = KnxValue::Control3Bit { control: true, step: 3 };
+        let debug_str = format!("{:?}", value);
+        assert!(debug_str.contains("Control3Bit"));
+        assert!(debug_str.contains("control"));
+        assert!(debug_str.contains("step"));
+    }
 }
