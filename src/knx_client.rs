@@ -158,6 +158,10 @@ pub enum DptType {
     U8,
     /// DPT 7.001 - Unsigned 16-bit (0-65535)
     U16,
+    /// DPT 10.001 - Time of day
+    Time,
+    /// DPT 11.001 - Date
+    Date,
     /// DPT 9.001 - Temperature in Celsius
     Temperature,
     /// DPT 9.004 - Illuminance in lux
@@ -180,6 +184,8 @@ impl DptType {
             DptType::Percent => "Percentage (DPT 5.001)",
             DptType::U8 => "Unsigned 8-bit (DPT 5.010)",
             DptType::U16 => "Unsigned 16-bit (DPT 7.001)",
+            DptType::Time => "Time of Day (DPT 10.001)",
+            DptType::Date => "Date (DPT 11.001)",
             DptType::Temperature => "Temperature (DPT 9.001)",
             DptType::Lux => "Illuminance (DPT 9.004)",
             DptType::Humidity => "Humidity (DPT 9.007)",
@@ -206,6 +212,14 @@ impl DptType {
             (DptType::Percent, KnxValue::U8(v)) => KnxValue::Percent(v.min(100)),
             (DptType::U8, KnxValue::U8(v)) => KnxValue::U8(v),
             (DptType::U16, KnxValue::U16(v)) => KnxValue::U16(v),
+            // DPT 10.001: Already decoded as Time variant
+            (DptType::Time, KnxValue::Time { day, hour, minute, second }) => {
+                KnxValue::Time { day, hour, minute, second }
+            }
+            // DPT 11.001: Already decoded as Date variant
+            (DptType::Date, KnxValue::Date { day, month, year }) => {
+                KnxValue::Date { day, month, year }
+            }
             (DptType::Temperature, KnxValue::Float2(v)) => KnxValue::Temperature(v),
             (DptType::Lux, KnxValue::Float2(v)) => KnxValue::Lux(v),
             (DptType::Humidity, KnxValue::Float2(v)) => KnxValue::Humidity(v),
@@ -242,6 +256,37 @@ pub enum KnxValue {
     U8(u8),
     /// Unsigned 16-bit value (DPT 7.001) - 0-65535, counters, pulses
     U16(u16),
+    /// Time of day (DPT 10.001)
+    ///
+    /// Format: 3 bytes encoding day, hour, minute, second
+    /// - `day`: 0 = no day, 1 = Monday, ..., 7 = Sunday
+    /// - `hour`: 0-23
+    /// - `minute`: 0-59
+    /// - `second`: 0-59
+    Time {
+        /// Day of week (0 = no day, 1 = Monday, ..., 7 = Sunday)
+        day: u8,
+        /// Hour (0-23)
+        hour: u8,
+        /// Minute (0-59)
+        minute: u8,
+        /// Second (0-59)
+        second: u8,
+    },
+    /// Date (DPT 11.001)
+    ///
+    /// Format: 3 bytes encoding day, month, year
+    /// - `day`: 1-31 (day of month)
+    /// - `month`: 1-12
+    /// - `year`: 0-99 (2000-2099) or 1990-2089 depending on implementation
+    Date {
+        /// Day of month (1-31)
+        day: u8,
+        /// Month (1-12)
+        month: u8,
+        /// Year (0-99, representing 1990-2089 or 2000-2099)
+        year: u8,
+    },
     /// Temperature in Celsius (DPT 9.001)
     Temperature(f32),
     /// Illuminance in lux (DPT 9.004)
@@ -1069,6 +1114,41 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
             buffer[4] = (v & 0xFF) as u8;
             13
         }
+        KnxValue::Time { day, hour, minute, second } => {
+            // DPT 10.001: 3 bytes encoding day, hour, minute, second
+            // Byte 1: (day<<5) | hour
+            // Byte 2: minute
+            // Byte 3: second
+            let day = day.min(7);       // Clamp to 0-7
+            let hour = hour.min(23);     // Clamp to 0-23
+            let minute = minute.min(59); // Clamp to 0-59
+            let second = second.min(59); // Clamp to 0-59
+
+            buffer[0] = 0x04; // NPDU length (4 bytes including TPCI/APCI)
+            buffer[1] = 0x00; // TPCI
+            buffer[2] = apci;
+            buffer[3] = (day << 5) | hour;
+            buffer[4] = minute;
+            buffer[5] = second;
+            14
+        }
+        KnxValue::Date { day, month, year } => {
+            // DPT 11.001: 3 bytes encoding day, month, year
+            // Byte 1: day (1-31)
+            // Byte 2: month (1-12)
+            // Byte 3: year (0-99)
+            let day = day.max(1).min(31);   // Clamp to 1-31
+            let month = month.max(1).min(12); // Clamp to 1-12
+            let year = year.min(99);         // Clamp to 0-99
+
+            buffer[0] = 0x04; // NPDU length (4 bytes including TPCI/APCI)
+            buffer[1] = 0x00; // TPCI
+            buffer[2] = apci;
+            buffer[3] = day;
+            buffer[4] = month;
+            buffer[5] = year;
+            14
+        }
         KnxValue::Temperature(t) | KnxValue::Lux(t) | KnxValue::Humidity(t)
         | KnxValue::Ppm(t) | KnxValue::Float2(t) => {
             let encoded = encode_dpt9(t);
@@ -1152,6 +1232,39 @@ fn decode_value(data: &[u8]) -> Option<KnxValue> {
                 Some(KnxValue::Float2(value))
             } else {
                 Some(KnxValue::U16(raw_u16))
+            }
+        }
+        4 => {
+            // Ambiguous: could be DPT 10.001 (Time) or DPT 11.001 (Date)
+            // Use heuristic: if byte1 <= 31 and byte2 <= 12 and byte3 <= 99, assume Date
+            // Otherwise assume Time
+            let byte1 = data[1];
+            let byte2 = data[2];
+            let byte3 = data[3];
+
+            if byte1 >= 1 && byte1 <= 31 && byte2 >= 1 && byte2 <= 12 && byte3 <= 99 {
+                // DPT 11.001: Date
+                // Byte 1: day (1-31)
+                // Byte 2: month (1-12)
+                // Byte 3: year (0-99)
+                Some(KnxValue::Date {
+                    day: byte1,
+                    month: byte2,
+                    year: byte3,
+                })
+            } else {
+                // DPT 10.001: Time of day
+                // Byte 1: (day<<5) | hour
+                // Byte 2: minute
+                // Byte 3: second
+                let day = (byte1 >> 5) & 0x07;
+                let hour = byte1 & 0x1F;
+                Some(KnxValue::Time {
+                    day,
+                    hour,
+                    minute: byte2,
+                    second: byte3,
+                })
             }
         }
         _ => None,
@@ -1321,6 +1434,262 @@ mod tests {
         assert_eq!(blinds_value, value);
     }
 
+    // ====== DPT 10.xxx (Time) Tests ======
+
+    #[test]
+    fn test_dpt10_encode_time() {
+        // DPT 10.001: Monday, 14:30:45
+        let value = KnxValue::Time { day: 1, hour: 14, minute: 30, second: 45 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 14);
+        assert_eq!(buffer[0], 0x04); // NPDU length
+        assert_eq!(buffer[1], 0x00); // TPCI
+        assert_eq!(buffer[2], 0x80); // APCI (write)
+        assert_eq!(buffer[3], (1 << 5) | 14); // day=1, hour=14
+        assert_eq!(buffer[4], 30); // minute
+        assert_eq!(buffer[5], 45); // second
+    }
+
+    #[test]
+    fn test_dpt10_encode_no_day() {
+        // DPT 10.001: No day, 00:00:00
+        let value = KnxValue::Time { day: 0, hour: 0, minute: 0, second: 0 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 14);
+        assert_eq!(buffer[3], 0x00); // day=0, hour=0
+        assert_eq!(buffer[4], 0); // minute
+        assert_eq!(buffer[5], 0); // second
+    }
+
+    #[test]
+    fn test_dpt10_encode_sunday_midnight() {
+        // DPT 10.001: Sunday (7), 23:59:59
+        let value = KnxValue::Time { day: 7, hour: 23, minute: 59, second: 59 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 14);
+        assert_eq!(buffer[3], (7 << 5) | 23); // day=7, hour=23
+        assert_eq!(buffer[4], 59); // minute
+        assert_eq!(buffer[5], 59); // second
+    }
+
+    #[test]
+    fn test_dpt10_encode_clamping() {
+        // Test that values > max get clamped
+        let value = KnxValue::Time { day: 10, hour: 25, minute: 70, second: 80 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 14);
+        // Should be clamped to day=7, hour=23, minute=59, second=59
+        assert_eq!(buffer[3], (7 << 5) | 23);
+        assert_eq!(buffer[4], 59);
+        assert_eq!(buffer[5], 59);
+    }
+
+    #[test]
+    fn test_dpt10_decode_time() {
+        // Simulate received data: APCI + 3 bytes
+        let data = [0x80, (3 << 5) | 15, 45, 30]; // Wednesday, 15:45:30
+
+        let decoded = decode_value(&data);
+        assert_eq!(
+            decoded,
+            Some(KnxValue::Time { day: 3, hour: 15, minute: 45, second: 30 })
+        );
+    }
+
+    #[test]
+    fn test_dpt10_roundtrip() {
+        // Test encode -> decode roundtrip
+        let original = KnxValue::Time { day: 5, hour: 12, minute: 30, second: 15 };
+
+        // Encode
+        let mut buffer = [0u8; 16];
+        encode_value_with_apci(original, &mut buffer, 0x80);
+
+        // Decode (simulated by extracting the encoded bytes)
+        let data = [buffer[2], buffer[3], buffer[4], buffer[5]];
+        let decoded = decode_value(&data);
+
+        assert_eq!(decoded, Some(original));
+    }
+
+    #[test]
+    fn test_dpt10_type_name() {
+        assert_eq!(DptType::Time.name(), "Time of Day (DPT 10.001)");
+    }
+
+    #[test]
+    fn test_dpt10_apply_to_value() {
+        // Test that Time values pass through unchanged
+        let value = KnxValue::Time { day: 2, hour: 10, minute: 30, second: 0 };
+        let applied = DptType::Time.apply_to_value(value);
+        assert_eq!(applied, value);
+    }
+
+    #[test]
+    fn test_dpt10_all_days() {
+        // Test all valid day values (0-7)
+        for day in 0..=7 {
+            let value = KnxValue::Time { day, hour: 12, minute: 0, second: 0 };
+            let mut buffer = [0u8; 16];
+            encode_value_with_apci(value, &mut buffer, 0x80);
+
+            // Decode
+            let data = [buffer[2], buffer[3], buffer[4], buffer[5]];
+            let decoded = decode_value(&data);
+
+            assert_eq!(decoded, Some(value));
+        }
+    }
+
+    // ====== DPT 11.xxx (Date) Tests ======
+
+    #[test]
+    fn test_dpt11_encode_date() {
+        // DPT 11.001: 2023-12-25 (25/12/23)
+        let value = KnxValue::Date { day: 25, month: 12, year: 23 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 14);
+        assert_eq!(buffer[0], 0x04); // NPDU length
+        assert_eq!(buffer[1], 0x00); // TPCI
+        assert_eq!(buffer[2], 0x80); // APCI (write)
+        assert_eq!(buffer[3], 25); // day
+        assert_eq!(buffer[4], 12); // month
+        assert_eq!(buffer[5], 23); // year
+    }
+
+    #[test]
+    fn test_dpt11_encode_first_day() {
+        // DPT 11.001: 2000-01-01 (01/01/00)
+        let value = KnxValue::Date { day: 1, month: 1, year: 0 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 14);
+        assert_eq!(buffer[3], 1); // day
+        assert_eq!(buffer[4], 1); // month
+        assert_eq!(buffer[5], 0); // year
+    }
+
+    #[test]
+    fn test_dpt11_encode_last_day() {
+        // DPT 11.001: 2099-12-31 (31/12/99)
+        let value = KnxValue::Date { day: 31, month: 12, year: 99 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 14);
+        assert_eq!(buffer[3], 31); // day
+        assert_eq!(buffer[4], 12); // month
+        assert_eq!(buffer[5], 99); // year
+    }
+
+    #[test]
+    fn test_dpt11_encode_clamping() {
+        // Test that values out of range get clamped
+        let value = KnxValue::Date { day: 0, month: 0, year: 150 };
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 14);
+        // Should be clamped to day=1, month=1, year=99
+        assert_eq!(buffer[3], 1);
+        assert_eq!(buffer[4], 1);
+        assert_eq!(buffer[5], 99);
+    }
+
+    #[test]
+    fn test_dpt11_decode_date() {
+        // Simulate received data: APCI + 3 bytes for 2023-06-15
+        let data = [0x80, 15, 6, 23];
+
+        let decoded = decode_value(&data);
+        assert_eq!(
+            decoded,
+            Some(KnxValue::Date { day: 15, month: 6, year: 23 })
+        );
+    }
+
+    #[test]
+    fn test_dpt11_roundtrip() {
+        // Test encode -> decode roundtrip
+        let original = KnxValue::Date { day: 10, month: 3, year: 24 };
+
+        // Encode
+        let mut buffer = [0u8; 16];
+        encode_value_with_apci(original, &mut buffer, 0x80);
+
+        // Decode (simulated by extracting the encoded bytes)
+        let data = [buffer[2], buffer[3], buffer[4], buffer[5]];
+        let decoded = decode_value(&data);
+
+        assert_eq!(decoded, Some(original));
+    }
+
+    #[test]
+    fn test_dpt11_type_name() {
+        assert_eq!(DptType::Date.name(), "Date (DPT 11.001)");
+    }
+
+    #[test]
+    fn test_dpt11_apply_to_value() {
+        // Test that Date values pass through unchanged
+        let value = KnxValue::Date { day: 15, month: 8, year: 23 };
+        let applied = DptType::Date.apply_to_value(value);
+        assert_eq!(applied, value);
+    }
+
+    #[test]
+    fn test_dpt11_all_months() {
+        // Test all valid month values (1-12)
+        for month in 1..=12 {
+            let value = KnxValue::Date { day: 15, month, year: 23 };
+            let mut buffer = [0u8; 16];
+            encode_value_with_apci(value, &mut buffer, 0x80);
+
+            // Decode
+            let data = [buffer[2], buffer[3], buffer[4], buffer[5]];
+            let decoded = decode_value(&data);
+
+            assert_eq!(decoded, Some(value));
+        }
+    }
+
+    #[test]
+    fn test_dpt11_heuristic_distinguishes_date() {
+        // Test that the heuristic correctly identifies Date
+        // 2023-03-15: day=15, month=3, year=23
+        let data = [0x80, 15, 3, 23];
+        let decoded = decode_value(&data);
+
+        match decoded {
+            Some(KnxValue::Date { day: 15, month: 3, year: 23 }) => {}, // Expected
+            _ => panic!("Expected Date, got {:?}", decoded),
+        }
+    }
+
+    #[test]
+    fn test_dpt11_heuristic_distinguishes_time() {
+        // Test that the heuristic correctly identifies Time when data doesn't match Date pattern
+        // Time with day=5, hour=18 encodes as (5<<5)|18 = 160 + 18 = 178
+        let data = [0x80, 178, 30, 45];
+        let decoded = decode_value(&data);
+
+        match decoded {
+            Some(KnxValue::Time { day: 5, hour: 18, minute: 30, second: 45 }) => {}, // Expected
+            _ => panic!("Expected Time, got {:?}", decoded),
+        }
+    }
+
     // ====== Integration Tests ======
 
     #[test]
@@ -1340,5 +1709,46 @@ mod tests {
         assert!(debug_str.contains("Control3Bit"));
         assert!(debug_str.contains("control"));
         assert!(debug_str.contains("step"));
+    }
+
+    #[test]
+    fn test_time_equality() {
+        let a = KnxValue::Time { day: 1, hour: 12, minute: 30, second: 45 };
+        let b = KnxValue::Time { day: 1, hour: 12, minute: 30, second: 45 };
+        let c = KnxValue::Time { day: 2, hour: 12, minute: 30, second: 45 };
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_time_debug_format() {
+        let value = KnxValue::Time { day: 3, hour: 15, minute: 45, second: 30 };
+        let debug_str = format!("{:?}", value);
+        assert!(debug_str.contains("Time"));
+        assert!(debug_str.contains("day"));
+        assert!(debug_str.contains("hour"));
+        assert!(debug_str.contains("minute"));
+        assert!(debug_str.contains("second"));
+    }
+
+    #[test]
+    fn test_date_equality() {
+        let a = KnxValue::Date { day: 15, month: 6, year: 23 };
+        let b = KnxValue::Date { day: 15, month: 6, year: 23 };
+        let c = KnxValue::Date { day: 16, month: 6, year: 23 };
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_date_debug_format() {
+        let value = KnxValue::Date { day: 25, month: 12, year: 23 };
+        let debug_str = format!("{:?}", value);
+        assert!(debug_str.contains("Date"));
+        assert!(debug_str.contains("day"));
+        assert!(debug_str.contains("month"));
+        assert!(debug_str.contains("year"));
     }
 }
