@@ -1244,6 +1244,61 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
             }
             25 // Total frame length: 11 (cEMI header) + 14 (string data)
         }
+        KnxValue::DateTime {
+            year,
+            month,
+            day,
+            day_of_week,
+            hour,
+            minute,
+            second,
+            fault,
+            working_day,
+            no_wd,
+            no_year,
+            no_date,
+            no_dow,
+            no_time,
+            standard_summertime,
+            quality,
+        } => {
+            // DPT 19.001: 8 bytes encoding date/time with flags
+            let year = year.clamp(1900, 2155) - 1900; // Year since 1900
+            let month = month.max(1).min(12);
+            let day = day.max(1).min(31);
+            let day_of_week = day_of_week.min(7);
+            let hour = hour.min(23);
+            let minute = minute.min(59);
+            let second = second.min(59);
+
+            buffer[0] = 0x09; // NPDU length (9 bytes: TPCI/APCI + 8 data bytes)
+            buffer[1] = 0x00; // TPCI
+            buffer[2] = apci;
+            buffer[3] = year as u8;
+            buffer[4] = month;
+            buffer[5] = day;
+            buffer[6] = (day_of_week << 5) | hour;
+            buffer[7] = minute;
+            buffer[8] = second;
+
+            // Flags byte 1 (byte 9)
+            let mut flags1 = 0u8;
+            if fault { flags1 |= 0x80; }
+            if working_day { flags1 |= 0x40; }
+            if no_wd { flags1 |= 0x20; }
+            if no_year { flags1 |= 0x10; }
+            if no_date { flags1 |= 0x08; }
+            if no_dow { flags1 |= 0x04; }
+            if no_time { flags1 |= 0x02; }
+            if standard_summertime { flags1 |= 0x01; }
+            buffer[9] = flags1;
+
+            // Flags byte 2 (byte 10) - only bit 7 is used for quality
+            let flags2 = if quality { 0x80 } else { 0x00 };
+            buffer[10] = flags2;
+
+            19 // Total frame length: 11 (cEMI header) + 8 (data)
+        }
         KnxValue::Temperature(t) | KnxValue::Lux(t) | KnxValue::Humidity(t)
         | KnxValue::Ppm(t) | KnxValue::Float2(t) => {
             let encoded = encode_dpt9(t);
@@ -1379,6 +1434,46 @@ fn decode_value(data: &[u8]) -> Option<KnxValue> {
             Some(KnxValue::StringAscii {
                 data: string_data,
                 len,
+            })
+        }
+        9 => {
+            // DPT 19.001: Date and Time (8 bytes)
+            // Byte 0: Year since 1900 (0-255 = 1900-2155)
+            // Byte 1: Month (1-12)
+            // Byte 2: Day (1-31)
+            // Byte 3: Day of week (bits 7-5) + Hour (bits 4-0)
+            // Byte 4: Minute
+            // Byte 5: Second
+            // Byte 6: Flags 1
+            // Byte 7: Flags 2
+            let year = 1900 + data[1] as u16;
+            let month = data[2];
+            let day = data[3];
+            let day_of_week = (data[4] >> 5) & 0x07;
+            let hour = data[4] & 0x1F;
+            let minute = data[5];
+            let second = data[6];
+
+            let flags1 = data[7];
+            let flags2 = data[8];
+
+            Some(KnxValue::DateTime {
+                year,
+                month,
+                day,
+                day_of_week,
+                hour,
+                minute,
+                second,
+                fault: (flags1 & 0x80) != 0,
+                working_day: (flags1 & 0x40) != 0,
+                no_wd: (flags1 & 0x20) != 0,
+                no_year: (flags1 & 0x10) != 0,
+                no_date: (flags1 & 0x08) != 0,
+                no_dow: (flags1 & 0x04) != 0,
+                no_time: (flags1 & 0x02) != 0,
+                standard_summertime: (flags1 & 0x01) != 0,
+                quality: (flags2 & 0x80) != 0,
             })
         }
         _ => None,
@@ -1980,6 +2075,224 @@ mod tests {
             Some(KnxValue::Time { day: 5, hour: 18, minute: 30, second: 45 }) => {}, // Expected
             _ => panic!("Expected Time, got {:?}", decoded),
         }
+    }
+
+    // ====== DPT 19.xxx (Date and Time) Tests ======
+
+    #[test]
+    fn test_dpt19_encode_datetime() {
+        // DPT 19.001: 2023-12-25 Monday 14:30:45, no flags
+        let value = KnxValue::DateTime {
+            year: 2023,
+            month: 12,
+            day: 25,
+            day_of_week: 1, // Monday
+            hour: 14,
+            minute: 30,
+            second: 45,
+            fault: false,
+            working_day: true,
+            no_wd: false,
+            no_year: false,
+            no_date: false,
+            no_dow: false,
+            no_time: false,
+            standard_summertime: false,
+            quality: true,
+        };
+        let mut buffer = [0u8; 32];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 19);
+        assert_eq!(buffer[0], 0x09); // NPDU length
+        assert_eq!(buffer[1], 0x00); // TPCI
+        assert_eq!(buffer[2], 0x80); // APCI (write)
+        assert_eq!(buffer[3], 123); // Year: 2023 - 1900 = 123
+        assert_eq!(buffer[4], 12); // Month
+        assert_eq!(buffer[5], 25); // Day
+        assert_eq!(buffer[6], (1 << 5) | 14); // day_of_week=1, hour=14
+        assert_eq!(buffer[7], 30); // Minute
+        assert_eq!(buffer[8], 45); // Second
+        assert_eq!(buffer[9], 0x40); // Flags1: working_day=1
+        assert_eq!(buffer[10], 0x80); // Flags2: quality=1
+    }
+
+    #[test]
+    fn test_dpt19_encode_year_bounds() {
+        // Test year clamping: 1900
+        let value1 = KnxValue::DateTime {
+            year: 1900,
+            month: 1,
+            day: 1,
+            day_of_week: 0,
+            hour: 0,
+            minute: 0,
+            second: 0,
+            fault: false,
+            working_day: false,
+            no_wd: false,
+            no_year: false,
+            no_date: false,
+            no_dow: false,
+            no_time: false,
+            standard_summertime: false,
+            quality: false,
+        };
+        let mut buffer = [0u8; 32];
+        encode_value_with_apci(value1, &mut buffer, 0x80);
+        assert_eq!(buffer[3], 0); // 1900 - 1900 = 0
+
+        // Test year clamping: 2155
+        let value2 = KnxValue::DateTime {
+            year: 2155,
+            month: 12,
+            day: 31,
+            day_of_week: 0,
+            hour: 23,
+            minute: 59,
+            second: 59,
+            fault: false,
+            working_day: false,
+            no_wd: false,
+            no_year: false,
+            no_date: false,
+            no_dow: false,
+            no_time: false,
+            standard_summertime: false,
+            quality: false,
+        };
+        encode_value_with_apci(value2, &mut buffer, 0x80);
+        assert_eq!(buffer[3], 255); // 2155 - 1900 = 255
+    }
+
+    #[test]
+    fn test_dpt19_encode_all_flags() {
+        // Test with all flags set
+        let value = KnxValue::DateTime {
+            year: 2000,
+            month: 6,
+            day: 15,
+            day_of_week: 3,
+            hour: 12,
+            minute: 30,
+            second: 0,
+            fault: true,
+            working_day: true,
+            no_wd: true,
+            no_year: true,
+            no_date: true,
+            no_dow: true,
+            no_time: true,
+            standard_summertime: true,
+            quality: true,
+        };
+        let mut buffer = [0u8; 32];
+        encode_value_with_apci(value, &mut buffer, 0x80);
+
+        // All flags in byte 9 should be set
+        assert_eq!(buffer[9], 0xFF);
+        // Quality flag in byte 10 should be set
+        assert_eq!(buffer[10], 0x80);
+    }
+
+    #[test]
+    fn test_dpt19_decode_datetime() {
+        // Simulate received data: APCI + 8 bytes for 2023-06-15 Wednesday 10:30:45
+        let mut data = [0u8; 9];
+        data[0] = 0x80; // APCI
+        data[1] = 123; // 2023 - 1900
+        data[2] = 6; // June
+        data[3] = 15; // 15th
+        data[4] = (3 << 5) | 10; // Wednesday, 10:00
+        data[5] = 30; // 30 minutes
+        data[6] = 45; // 45 seconds
+        data[7] = 0x40; // working_day flag
+        data[8] = 0x80; // quality flag
+
+        let decoded = decode_value(&data);
+        match decoded {
+            Some(KnxValue::DateTime {
+                year,
+                month,
+                day,
+                day_of_week,
+                hour,
+                minute,
+                second,
+                fault,
+                working_day,
+                no_wd,
+                no_year,
+                no_date,
+                no_dow,
+                no_time,
+                standard_summertime,
+                quality,
+            }) => {
+                assert_eq!(year, 2023);
+                assert_eq!(month, 6);
+                assert_eq!(day, 15);
+                assert_eq!(day_of_week, 3);
+                assert_eq!(hour, 10);
+                assert_eq!(minute, 30);
+                assert_eq!(second, 45);
+                assert_eq!(fault, false);
+                assert_eq!(working_day, true);
+                assert_eq!(no_wd, false);
+                assert_eq!(no_year, false);
+                assert_eq!(no_date, false);
+                assert_eq!(no_dow, false);
+                assert_eq!(no_time, false);
+                assert_eq!(standard_summertime, false);
+                assert_eq!(quality, true);
+            }
+            _ => panic!("Expected DateTime, got {:?}", decoded),
+        }
+    }
+
+    #[test]
+    fn test_dpt19_roundtrip() {
+        // Test encode -> decode roundtrip
+        let original = KnxValue::DateTime {
+            year: 2024,
+            month: 3,
+            day: 10,
+            day_of_week: 7, // Sunday
+            hour: 18,
+            minute: 45,
+            second: 30,
+            fault: false,
+            working_day: false,
+            no_wd: false,
+            no_year: false,
+            no_date: false,
+            no_dow: false,
+            no_time: false,
+            standard_summertime: true,
+            quality: false,
+        };
+
+        // Encode
+        let mut buffer = [0u8; 32];
+        encode_value_with_apci(original, &mut buffer, 0x80);
+
+        // Decode (extract the relevant bytes)
+        let data = &buffer[2..11]; // APCI + 8 data bytes
+        let decoded = decode_value(data);
+
+        // Compare
+        match (&original, decoded) {
+            (KnxValue::DateTime { .. }, Some(KnxValue::DateTime { .. })) => {
+                // Both are DateTime, values should match
+                assert_eq!(Some(original), decoded);
+            }
+            _ => panic!("Roundtrip failed"),
+        }
+    }
+
+    #[test]
+    fn test_dpt19_type_name() {
+        assert_eq!(DptType::DateTime.name(), "Date and Time (DPT 19.001)");
     }
 
     // ====== Integration Tests ======
