@@ -162,6 +162,10 @@ pub enum DptType {
     Time,
     /// DPT 11.001 - Date
     Date,
+    /// DPT 16.000 / 16.001 - String ASCII (ISO 8859-1)
+    StringAscii,
+    /// DPT 19.001 - Date and Time
+    DateTime,
     /// DPT 9.001 - Temperature in Celsius
     Temperature,
     /// DPT 9.004 - Illuminance in lux
@@ -186,6 +190,8 @@ impl DptType {
             DptType::U16 => "Unsigned 16-bit (DPT 7.001)",
             DptType::Time => "Time of Day (DPT 10.001)",
             DptType::Date => "Date (DPT 11.001)",
+            DptType::StringAscii => "String ASCII (DPT 16.000/16.001)",
+            DptType::DateTime => "Date and Time (DPT 19.001)",
             DptType::Temperature => "Temperature (DPT 9.001)",
             DptType::Lux => "Illuminance (DPT 9.004)",
             DptType::Humidity => "Humidity (DPT 9.007)",
@@ -220,6 +226,12 @@ impl DptType {
             (DptType::Date, KnxValue::Date { day, month, year }) => {
                 KnxValue::Date { day, month, year }
             }
+            // DPT 16.xxx: Already decoded as StringAscii variant
+            (DptType::StringAscii, KnxValue::StringAscii { data, len }) => {
+                KnxValue::StringAscii { data, len }
+            }
+            // DPT 19.001: Already decoded as DateTime variant
+            (DptType::DateTime, val @ KnxValue::DateTime { .. }) => val,
             (DptType::Temperature, KnxValue::Float2(v)) => KnxValue::Temperature(v),
             (DptType::Lux, KnxValue::Float2(v)) => KnxValue::Lux(v),
             (DptType::Humidity, KnxValue::Float2(v)) => KnxValue::Humidity(v),
@@ -286,6 +298,70 @@ pub enum KnxValue {
         month: u8,
         /// Year (0-99, representing 1990-2089 or 2000-2099)
         year: u8,
+    },
+    /// String ASCII (DPT 16.000/16.001)
+    ///
+    /// Format: Up to 14 ASCII characters (ISO 8859-1)
+    /// - Null-terminated or padded with null bytes
+    /// - Maximum 14 characters
+    StringAscii {
+        /// String data (up to 14 bytes, null-terminated)
+        data: [u8; 14],
+        /// Actual string length (excluding null terminator)
+        len: u8,
+    },
+    /// Date and Time (DPT 19.001)
+    ///
+    /// Format: 8 bytes encoding year, month, day, day of week, hour, minute, second, flags
+    /// - `year`: 1900-2155 (full year)
+    /// - `month`: 1-12
+    /// - `day`: 1-31
+    /// - `day_of_week`: 0 = no day, 1 = Monday, ..., 7 = Sunday
+    /// - `hour`: 0-23
+    /// - `minute`: 0-59
+    /// - `second`: 0-59
+    /// - `fault`: Fault flag
+    /// - `working_day`: Working day flag
+    /// - `no_wd`: No working day valid flag
+    /// - `no_year`: No year valid flag
+    /// - `no_date`: No date valid flag
+    /// - `no_dow`: No day of week valid flag
+    /// - `no_time`: No time valid flag
+    /// - `standard_summertime`: Standard/summertime flag (false = standard, true = summertime)
+    /// - `quality`: Clock quality flag
+    DateTime {
+        /// Year (1900-2155)
+        year: u16,
+        /// Month (1-12)
+        month: u8,
+        /// Day of month (1-31)
+        day: u8,
+        /// Day of week (0 = no day, 1 = Monday, ..., 7 = Sunday)
+        day_of_week: u8,
+        /// Hour (0-23)
+        hour: u8,
+        /// Minute (0-59)
+        minute: u8,
+        /// Second (0-59)
+        second: u8,
+        /// Fault flag
+        fault: bool,
+        /// Working day flag
+        working_day: bool,
+        /// No working day valid flag
+        no_wd: bool,
+        /// No year valid flag
+        no_year: bool,
+        /// No date valid flag
+        no_date: bool,
+        /// No day of week valid flag
+        no_dow: bool,
+        /// No time valid flag
+        no_time: bool,
+        /// Standard/summertime flag (false = standard, true = summertime)
+        standard_summertime: bool,
+        /// Clock quality flag
+        quality: bool,
     },
     /// Temperature in Celsius (DPT 9.001)
     Temperature(f32),
@@ -1149,6 +1225,25 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
             buffer[5] = year;
             14
         }
+        KnxValue::StringAscii { data, len } => {
+            // DPT 16.000/16.001: 14 bytes ASCII string
+            // Null-terminated or padded with nulls
+            let len = len.min(14); // Clamp to 0-14
+
+            buffer[0] = 0x0F; // NPDU length (15 bytes: TPCI/APCI + 14 data bytes)
+            buffer[1] = 0x00; // TPCI
+            buffer[2] = apci;
+
+            // Copy string data
+            for i in 0..14 {
+                if i < len as usize {
+                    buffer[3 + i] = data[i];
+                } else {
+                    buffer[3 + i] = 0; // Null padding
+                }
+            }
+            25 // Total frame length: 11 (cEMI header) + 14 (string data)
+        }
         KnxValue::Temperature(t) | KnxValue::Lux(t) | KnxValue::Humidity(t)
         | KnxValue::Ppm(t) | KnxValue::Float2(t) => {
             let encoded = encode_dpt9(t);
@@ -1266,6 +1361,25 @@ fn decode_value(data: &[u8]) -> Option<KnxValue> {
                     second: byte3,
                 })
             }
+        }
+        15 => {
+            // DPT 16.000/16.001: String ASCII (14 bytes)
+            let mut string_data = [0u8; 14];
+            let mut len = 0u8;
+
+            // Copy string data (skip APCI at data[0])
+            for i in 0..14 {
+                let byte = data[1 + i];
+                string_data[i] = byte;
+                if byte != 0 && len == i as u8 {
+                    len = (i + 1) as u8;
+                }
+            }
+
+            Some(KnxValue::StringAscii {
+                data: string_data,
+                len,
+            })
         }
         _ => None,
     }
@@ -1546,6 +1660,184 @@ mod tests {
             let decoded = decode_value(&data);
 
             assert_eq!(decoded, Some(value));
+        }
+    }
+
+    // ====== DPT 16.xxx (String ASCII) Tests ======
+
+    /// Helper function to create StringAscii value from &str
+    fn string_ascii_from_str(s: &str) -> KnxValue {
+        let mut data = [0u8; 14];
+        let bytes = s.as_bytes();
+        let len = bytes.len().min(14);
+        data[..len].copy_from_slice(&bytes[..len]);
+        KnxValue::StringAscii {
+            data,
+            len: len as u8,
+        }
+    }
+
+    #[test]
+    fn test_dpt16_encode_short_string() {
+        // DPT 16: "Hello"
+        let value = string_ascii_from_str("Hello");
+        let mut buffer = [0u8; 32];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 25);
+        assert_eq!(buffer[0], 0x0F); // NPDU length
+        assert_eq!(buffer[1], 0x00); // TPCI
+        assert_eq!(buffer[2], 0x80); // APCI (write)
+        assert_eq!(&buffer[3..8], b"Hello");
+        assert_eq!(buffer[8], 0); // Null padding
+    }
+
+    #[test]
+    fn test_dpt16_encode_full_string() {
+        // DPT 16: 14 characters "Hello World!!!"
+        let value = string_ascii_from_str("Hello World!!!");
+        let mut buffer = [0u8; 32];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 25);
+        assert_eq!(&buffer[3..17], b"Hello World!!!");
+    }
+
+    #[test]
+    fn test_dpt16_encode_empty_string() {
+        // DPT 16: empty string
+        let value = string_ascii_from_str("");
+        let mut buffer = [0u8; 32];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 25);
+        // All data bytes should be null
+        for i in 3..17 {
+            assert_eq!(buffer[i], 0);
+        }
+    }
+
+    #[test]
+    fn test_dpt16_encode_with_padding() {
+        // DPT 16: "Test" (should be padded with nulls)
+        let value = string_ascii_from_str("Test");
+        let mut buffer = [0u8; 32];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 25);
+        assert_eq!(&buffer[3..7], b"Test");
+        // Check null padding
+        for i in 7..17 {
+            assert_eq!(buffer[i], 0);
+        }
+    }
+
+    #[test]
+    fn test_dpt16_decode_string() {
+        // Simulate received data: APCI + 14 bytes for "KNX"
+        let mut data = [0u8; 15];
+        data[0] = 0x80; // APCI
+        data[1] = b'K';
+        data[2] = b'N';
+        data[3] = b'X';
+        // Rest are zeros (null padding)
+
+        let decoded = decode_value(&data);
+        match decoded {
+            Some(KnxValue::StringAscii { data, len }) => {
+                assert_eq!(len, 3);
+                assert_eq!(&data[0..3], b"KNX");
+            }
+            _ => panic!("Expected StringAscii, got {:?}", decoded),
+        }
+    }
+
+    #[test]
+    fn test_dpt16_roundtrip() {
+        // Test encode -> decode roundtrip
+        let original = string_ascii_from_str("Test123");
+
+        // Encode
+        let mut buffer = [0u8; 32];
+        encode_value_with_apci(original, &mut buffer, 0x80);
+
+        // Decode (extract the relevant bytes)
+        let data = &buffer[2..17]; // APCI + 14 data bytes
+        let decoded = decode_value(data);
+
+        match (&original, decoded) {
+            (
+                KnxValue::StringAscii {
+                    data: d1,
+                    len: l1,
+                },
+                Some(KnxValue::StringAscii {
+                    data: d2,
+                    len: l2,
+                }),
+            ) => {
+                assert_eq!(l1, &l2);
+                assert_eq!(&d1[..], &d2[..]);
+            }
+            _ => panic!("Roundtrip failed"),
+        }
+    }
+
+    #[test]
+    fn test_dpt16_type_name() {
+        assert_eq!(
+            DptType::StringAscii.name(),
+            "String ASCII (DPT 16.000/16.001)"
+        );
+    }
+
+    #[test]
+    fn test_dpt16_apply_to_value() {
+        // Test that StringAscii values pass through unchanged
+        let value = string_ascii_from_str("Hello");
+        let applied = DptType::StringAscii.apply_to_value(value);
+
+        match (&value, applied) {
+            (
+                KnxValue::StringAscii {
+                    data: d1,
+                    len: l1,
+                },
+                KnxValue::StringAscii {
+                    data: d2,
+                    len: l2,
+                },
+            ) => {
+                assert_eq!(l1, &l2);
+                assert_eq!(&d1[..], &d2[..]);
+            }
+            _ => panic!("apply_to_value failed"),
+        }
+    }
+
+    #[test]
+    fn test_dpt16_special_characters() {
+        // Test with special ASCII characters
+        let value = string_ascii_from_str("Test!@#$%");
+        let mut buffer = [0u8; 32];
+        encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(&buffer[3..12], b"Test!@#$%");
+    }
+
+    #[test]
+    fn test_dpt16_length_clamping() {
+        // Test that strings > 14 characters get clamped
+        let mut data = [b'A'; 14];
+        let value = KnxValue::StringAscii { data, len: 20 }; // len > 14
+
+        let mut buffer = [0u8; 32];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 25);
+        // Should encode exactly 14 'A's
+        for i in 3..17 {
+            assert_eq!(buffer[i], b'A');
         }
     }
 
