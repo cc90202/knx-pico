@@ -1528,6 +1528,95 @@ pub fn format_group_address(addr: GroupAddress) -> (u8, u8, u8) {
 mod tests {
     use super::*;
 
+    // ====== DPT 1.xxx (Boolean) Tests ======
+
+    #[test]
+    fn test_dpt1_encode_true() {
+        // DPT 1.xxx: Boolean true
+        let value = KnxValue::Bool(true);
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 12);
+        assert_eq!(buffer[0], 0x01); // NPDU length (1 byte)
+        assert_eq!(buffer[1], 0x00); // TPCI
+        assert_eq!(buffer[2], 0x81); // APCI (0x80) | 0x01 (true)
+    }
+
+    #[test]
+    fn test_dpt1_encode_false() {
+        // DPT 1.xxx: Boolean false
+        let value = KnxValue::Bool(false);
+        let mut buffer = [0u8; 16];
+        let len = encode_value_with_apci(value, &mut buffer, 0x80);
+
+        assert_eq!(len, 12);
+        assert_eq!(buffer[0], 0x01); // NPDU length (1 byte)
+        assert_eq!(buffer[1], 0x00); // TPCI
+        assert_eq!(buffer[2], 0x80); // APCI (0x80) | 0x00 (false)
+    }
+
+    #[test]
+    fn test_dpt1_decode_true() {
+        // Decode true value from 1-byte data
+        let data = [0x81]; // APCI with bit 0 set
+        let value = decode_value(&data);
+
+        assert_eq!(value, Some(KnxValue::Bool(true)));
+    }
+
+    #[test]
+    fn test_dpt1_decode_false() {
+        // Decode false value from 1-byte data
+        let data = [0x80]; // APCI with bit 0 clear
+        let value = decode_value(&data);
+
+        assert_eq!(value, Some(KnxValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_dpt1_roundtrip_true() {
+        // Test encode/decode roundtrip for true
+        let original = KnxValue::Bool(true);
+        let mut buffer = [0u8; 16];
+        encode_value_with_apci(original, &mut buffer, 0x80);
+
+        // Extract data portion (APCI byte)
+        let decoded = decode_value(&buffer[2..3]);
+
+        assert_eq!(decoded, Some(original));
+    }
+
+    #[test]
+    fn test_dpt1_roundtrip_false() {
+        // Test encode/decode roundtrip for false
+        let original = KnxValue::Bool(false);
+        let mut buffer = [0u8; 16];
+        encode_value_with_apci(original, &mut buffer, 0x80);
+
+        // Extract data portion (APCI byte)
+        let decoded = decode_value(&buffer[2..3]);
+
+        assert_eq!(decoded, Some(original));
+    }
+
+    #[test]
+    fn test_dpt1_type_name() {
+        assert_eq!(DptType::Bool.name(), "Boolean (DPT 1.xxx)");
+    }
+
+    #[test]
+    fn test_dpt1_apply_to_value() {
+        // Test that apply_to_value preserves Bool values
+        let value = KnxValue::Bool(true);
+        let result = DptType::Bool.apply_to_value(value);
+        assert_eq!(result, KnxValue::Bool(true));
+
+        let value = KnxValue::Bool(false);
+        let result = DptType::Bool.apply_to_value(value);
+        assert_eq!(result, KnxValue::Bool(false));
+    }
+
     // ====== DPT 3.xxx (Control3Bit) Tests ======
 
     #[test]
