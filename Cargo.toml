@@ -123,6 +123,63 @@ overflow-checks = false
 # Even in debug, optimize a bit for usable performance
 opt-level = 1
 
+[lints.rust]
+# Compiler lints for code quality
+ambiguous_negative_literals = "warn"
+missing_debug_implementations = "warn"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+
+[lints.clippy]
+# Enable all major lint categories
+cargo = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+
+# Restriction lints for consistency and quality
+allow_attributes_without_reason = "warn"
+as_pointer_underscore = "warn"
+assertions_on_result_states = "warn"
+clone_on_ref_ptr = "warn"
+deref_by_slicing = "warn"
+disallowed_script_idents = "warn"
+empty_drop = "warn"
+empty_enum_variants_with_brackets = "warn"
+empty_structs_with_brackets = "warn"
+fn_to_numeric_cast_any = "warn"
+if_then_some_else_none = "warn"
+map_err_ignore = "warn"
+redundant_type_annotations = "warn"
+renamed_function_params = "warn"
+semicolon_outside_block = "warn"
+string_to_string = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+unneeded_field_pattern = "warn"
+unused_result_ok = "warn"
+
+# Custom opt-outs for embedded/no_std context
+missing_errors_doc = "allow"          # Many embedded functions don't need error docs
+missing_panics_doc = "allow"          # Panics are rare and documented where needed
+module_name_repetitions = "allow"     # Common pattern in protocol code
+must_use_candidate = "allow"          # Too noisy for builder patterns
+cast_possible_truncation = "allow"    # Common in protocol parsing, checked manually
+cast_sign_loss = "allow"              # Common in protocol parsing, checked manually
+cast_possible_wrap = "allow"          # Common in protocol parsing, checked manually
+similar_names = "allow"               # Protocol fields have similar names by design
+too_many_lines = "allow"              # Some protocol parsers are legitimately long
+struct_excessive_bools = "allow"      # Control fields have multiple bools by design
+inline_always = "allow"               # Hot-path optimizations for embedded performance
+cast_precision_loss = "allow"         # DPT conversion math requires precision trade-offs
+
 [package.metadata.embassy]
 build = [
   { target = "thumbv8m.main-none-eabihf" }

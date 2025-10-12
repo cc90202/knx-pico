@@ -1,8 +1,9 @@
 //! KNXnet/IP Tunneling Client with Typestate Pattern
 //!
-//! This module provides a tunneling client for communicating with KNX gateways
-//! over IP networks. The client uses the typestate pattern to enforce correct
-//! state transitions at compile-time, preventing invalid operations.
+//! Tunneling client for KNX gateway communication over IP networks.
+//!
+//! Uses the typestate pattern to enforce correct state transitions at
+//! compile-time, preventing invalid operations.
 //!
 //! ## Features
 //!
@@ -39,9 +40,9 @@
 //! ```
 
 use crate::error::{KnxError, Result};
-use crate::protocol::constants::*;
+use crate::protocol::constants::MAX_FRAME_SIZE;
 use crate::protocol::frame::Hpai;
-use crate::protocol::services::*;
+use crate::protocol::services::{ConnectRequest, ConnectResponse, ConnectionHeader, TunnelingRequest, TunnelingAck, ConnectionStateRequest, ConnectionStateResponse, DisconnectRequest};
 
 /// Maximum buffer size for frames
 const BUFFER_SIZE: usize = MAX_FRAME_SIZE;
@@ -56,7 +57,10 @@ pub struct Idle;
 
 /// Connection request sent, waiting for response
 #[derive(Debug, Clone, Copy)]
-pub struct Connecting;
+pub struct Connecting {
+    /// Length of the frame data in `tx_buffer`
+    pub frame_len: usize,
+}
 
 /// Connected and ready to send/receive
 #[derive(Debug, Clone, Copy)]
@@ -71,16 +75,19 @@ pub struct Connected {
 
 /// Disconnect request sent
 #[derive(Debug, Clone, Copy)]
-pub struct Disconnecting;
+pub struct Disconnecting {
+    /// Length of the frame data in `tx_buffer`
+    pub frame_len: usize,
+}
 
 // =============================================================================
 // Tunneling Client with Generic State Parameter
 // =============================================================================
 
-/// Tunneling client for KNX gateway communication
+/// Tunneling client for KNX gateway communication.
 ///
-/// This client uses the typestate pattern to enforce correct state transitions
-/// at compile-time. The state parameter `S` determines which methods are available.
+/// Uses typestate pattern for compile-time state validation.
+/// The state parameter `S` determines which methods are available.
 ///
 /// ## State Machine
 ///
@@ -110,7 +117,7 @@ pub struct TunnelClient<State> {
     /// Buffer for building frames
     tx_buffer: [u8; BUFFER_SIZE],
     /// Buffer for receiving frames
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "Reserved for future receive buffer optimization")]
     rx_buffer: [u8; BUFFER_SIZE],
     /// Current state (type changes based on state!)
     state: State,
@@ -150,16 +157,26 @@ impl TunnelClient<Idle> {
     /// Create a new tunnel client (starts in Idle state)
     ///
     /// # Arguments
-    /// * `gateway_addr` - IP address of the KNX gateway
+    /// * `gateway_addr` - IP address of the KNX gateway (accepts array, tuple, or `Ipv4Addr`)
     /// * `gateway_port` - Port number (typically 3671)
     ///
-    /// # Example
+    /// # Examples
     /// ```rust,no_run
     /// use knx_rs::protocol::tunnel::TunnelClient;
+    /// use knx_rs::Ipv4Addr;
     ///
+    /// // From array
     /// let client = TunnelClient::new([192, 168, 1, 10], 3671);
+    ///
+    /// // From tuple
+    /// let client = TunnelClient::new((192, 168, 1, 10), 3671);
+    ///
+    /// // From Ipv4Addr
+    /// let addr = Ipv4Addr::new(192, 168, 1, 10);
+    /// let client = TunnelClient::new(addr, 3671);
     /// ```
-    pub fn new(gateway_addr: [u8; 4], gateway_port: u16) -> Self {
+    pub fn new(gateway_addr: impl Into<crate::net::Ipv4Addr>, gateway_port: u16) -> Self {
+        let gateway_addr = gateway_addr.into().octets();
         // Use NAT mode (0.0.0.0:0) - gateway will respond to source address
         let nat_endpoint = Hpai::new([0, 0, 0, 0], 0);
 
@@ -174,44 +191,87 @@ impl TunnelClient<Idle> {
         }
     }
 
+    /// Create tunnel client with explicit local endpoint (Routing mode)
+    ///
+    /// Some gateways don't support NAT mode and need real IP.
+    ///
+    /// # Arguments
+    /// * `gateway_addr` - IP address of the KNX gateway (accepts array, tuple, or `Ipv4Addr`)
+    /// * `gateway_port` - Port number (typically 3671)
+    /// * `local_addr` - Local IP address of this device (accepts array, tuple, or `Ipv4Addr`)
+    /// * `local_port` - Local port (typically 3671)
+    ///
+    /// # Examples
+    /// ```rust,no_run
+    /// use knx_rs::protocol::tunnel::TunnelClient;
+    ///
+    /// // From arrays
+    /// let client = TunnelClient::new_with_local_endpoint(
+    ///     [192, 168, 1, 10],
+    ///     3671,
+    ///     [192, 168, 1, 100],
+    ///     3671
+    /// );
+    ///
+    /// // From tuples
+    /// let client = TunnelClient::new_with_local_endpoint(
+    ///     (192, 168, 1, 10),
+    ///     3671,
+    ///     (192, 168, 1, 100),
+    ///     3671
+    /// );
+    /// ```
+    pub fn new_with_local_endpoint(
+        gateway_addr: impl Into<crate::net::Ipv4Addr>,
+        gateway_port: u16,
+        local_addr: impl Into<crate::net::Ipv4Addr>,
+        local_port: u16,
+    ) -> Self {
+        let gateway_addr = gateway_addr.into().octets();
+        let local_addr = local_addr.into().octets();
+        let local_endpoint = Hpai::new(local_addr, local_port);
+
+        TunnelClient {
+            gateway_addr,
+            gateway_port,
+            control_endpoint: local_endpoint,
+            data_endpoint: local_endpoint,
+            tx_buffer: [0u8; BUFFER_SIZE],
+            rx_buffer: [0u8; BUFFER_SIZE],
+            state: Idle,
+        }
+    }
+
     /// Start connection (Idle → Connecting)
     ///
-    /// Consumes self and returns a new client in Connecting state along
-    /// with the CONNECT_REQUEST frame to send.
+    /// Consumes self and returns a new client in Connecting state.
+    /// The `CONNECT_REQUEST` frame is available in the client's internal buffer.
     ///
     /// # Returns
-    /// - New client in Connecting state
-    /// - Frame data to send to gateway
+    /// - New client in Connecting state with frame ready to send
     ///
     /// # Example
     /// ```rust,no_run
     /// let client = TunnelClient::new([192, 168, 1, 10], 3671);
-    /// let (client, frame) = client.connect()?;
+    /// let mut client = client.connect()?;
+    /// let frame = client.frame_data();
     /// // send frame over network...
     /// ```
-    pub fn connect(mut self) -> Result<(TunnelClient<Connecting>, &'static [u8])> {
+    pub fn connect(mut self) -> Result<TunnelClient<Connecting>> {
         // Build CONNECT_REQUEST
         let request = ConnectRequest::new(self.control_endpoint, self.data_endpoint);
         let len = request.build(&mut self.tx_buffer)?;
 
-        // Create frame slice (this is safe but limited - will fix in Phase 4)
-        let frame_data = &self.tx_buffer[..len];
-
         // Transition to Connecting state
-        let client = TunnelClient {
+        Ok(TunnelClient {
             gateway_addr: self.gateway_addr,
             gateway_port: self.gateway_port,
             control_endpoint: self.control_endpoint,
             data_endpoint: self.data_endpoint,
             tx_buffer: self.tx_buffer,
             rx_buffer: self.rx_buffer,
-            state: Connecting,
-        };
-
-        // SAFETY: We need to return a 'static reference but we own the buffer
-        // This is a limitation of the current API - will be solved with async in Phase 4
-        // For now, caller must use the frame before next operation
-        Ok((client, unsafe { core::mem::transmute::<&[u8], &[u8]>(frame_data) }))
+            state: Connecting { frame_len: len },
+        })
     }
 }
 
@@ -220,12 +280,21 @@ impl TunnelClient<Idle> {
 // =============================================================================
 
 impl TunnelClient<Connecting> {
-    /// Handle CONNECT_RESPONSE (Connecting → Connected)
+    /// Get the `CONNECT_REQUEST` frame data to send
+    ///
+    /// Returns a reference to the frame in the internal buffer.
+    /// Valid until the next state transition.
+    #[inline]
+    pub fn frame_data(&self) -> &[u8] {
+        &self.tx_buffer[..self.state.frame_len]
+    }
+
+    /// Handle `CONNECT_RESPONSE` (Connecting → Connected)
     ///
     /// Processes the gateway's response to our connection request.
     ///
     /// # Arguments
-    /// * `response` - CONNECT_RESPONSE frame body
+    /// * `response` - `CONNECT_RESPONSE` frame body
     ///
     /// # Returns
     /// - `Ok(TunnelClient<Connected>)` - Connection successful
@@ -246,7 +315,7 @@ impl TunnelClient<Connecting> {
 
         if !resp.is_ok() {
             // Connection failed - client is dropped, caller should create new one
-            return Err(KnxError::ConnectionFailed);
+            return Err(KnxError::connection_failed());
         }
 
         // Transition to Connected state
@@ -304,7 +373,7 @@ impl TunnelClient<Connected> {
         self.state.recv_sequence
     }
 
-    /// Send TUNNELING_REQUEST
+    /// Send `TUNNELING_REQUEST`
     ///
     /// No state check needed - if you're here, you're connected!
     ///
@@ -334,7 +403,7 @@ impl TunnelClient<Connected> {
         Ok(&self.tx_buffer[..len])
     }
 
-    /// Build TUNNELING_ACK frame
+    /// Build `TUNNELING_ACK` frame
     ///
     /// # Arguments
     /// * `sequence` - Sequence number to acknowledge
@@ -346,10 +415,10 @@ impl TunnelClient<Connected> {
         Ok(&self.tx_buffer[..len])
     }
 
-    /// Handle TUNNELING_INDICATION (incoming event from gateway)
+    /// Handle `TUNNELING_INDICATION` (incoming event from gateway)
     ///
     /// # Arguments
-    /// * `body` - TUNNELING_REQUEST frame body
+    /// * `body` - `TUNNELING_REQUEST` frame body
     ///
     /// # Returns
     /// cEMI data from the tunnel request
@@ -364,7 +433,7 @@ impl TunnelClient<Connected> {
 
         // Verify sequence counter
         if request.connection_header.sequence_counter != self.state.recv_sequence {
-            return Err(KnxError::SequenceMismatch);
+            return Err(KnxError::sequence_mismatch());
         }
 
         // Increment receive sequence counter
@@ -373,20 +442,20 @@ impl TunnelClient<Connected> {
         Ok(request.cemi_data)
     }
 
-    /// Handle TUNNELING_ACK
+    /// Handle `TUNNELING_ACK`
     ///
     /// Verifies the ACK status
     pub fn handle_tunneling_ack(&self, body: &[u8]) -> Result<()> {
         let ack = TunnelingAck::parse(body)?;
 
         if !ack.is_ok() {
-            return Err(KnxError::TunnelingAckFailed);
+            return Err(KnxError::tunneling_ack_failed());
         }
 
         Ok(())
     }
 
-    /// Send CONNECTIONSTATE_REQUEST (heartbeat)
+    /// Send `CONNECTIONSTATE_REQUEST` (heartbeat)
     ///
     /// Used to check if connection is still alive
     pub fn send_heartbeat(&mut self) -> Result<&[u8]> {
@@ -398,7 +467,7 @@ impl TunnelClient<Connected> {
         Ok(&self.tx_buffer[..len])
     }
 
-    /// Handle CONNECTIONSTATE_RESPONSE
+    /// Handle `CONNECTIONSTATE_RESPONSE`
     ///
     /// On error, automatically transitions to Idle
     pub fn handle_heartbeat_response(
@@ -409,7 +478,7 @@ impl TunnelClient<Connected> {
 
         if !response.is_ok() {
             // Connection lost
-            return Err(KnxError::ConnectionLost);
+            return Err(KnxError::connection_lost());
         }
 
         Ok(self)
@@ -418,29 +487,31 @@ impl TunnelClient<Connected> {
     /// Start disconnect (Connected → Disconnecting)
     ///
     /// # Returns
-    /// - New client in Disconnecting state
-    /// - DISCONNECT_REQUEST frame to send
-    pub fn disconnect(mut self) -> Result<(TunnelClient<Disconnecting>, &'static [u8])> {
+    /// - New client in Disconnecting state with frame ready to send
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// let mut client = client.disconnect()?;
+    /// let frame = client.frame_data();
+    /// // send frame over network...
+    /// ```
+    pub fn disconnect(mut self) -> Result<TunnelClient<Disconnecting>> {
         let request = DisconnectRequest::new(
             self.state.channel_id,
             self.control_endpoint,
         );
         let len = request.build(&mut self.tx_buffer)?;
-        let frame_data = &self.tx_buffer[..len];
 
         // Transition to Disconnecting state
-        let client = TunnelClient {
+        Ok(TunnelClient {
             gateway_addr: self.gateway_addr,
             gateway_port: self.gateway_port,
             control_endpoint: self.control_endpoint,
             data_endpoint: self.data_endpoint,
             tx_buffer: self.tx_buffer,
             rx_buffer: self.rx_buffer,
-            state: Disconnecting,
-        };
-
-        // SAFETY: Same as connect() - will be fixed in Phase 4
-        Ok((client, unsafe { core::mem::transmute::<&[u8], &[u8]>(frame_data) }))
+            state: Disconnecting { frame_len: len },
+        })
     }
 }
 
@@ -449,7 +520,16 @@ impl TunnelClient<Connected> {
 // =============================================================================
 
 impl TunnelClient<Disconnecting> {
-    /// Handle DISCONNECT_RESPONSE and finish (Disconnecting → Idle)
+    /// Get the `DISCONNECT_REQUEST` frame data to send
+    ///
+    /// Returns a reference to the frame in the internal buffer.
+    /// Valid until the next state transition.
+    #[inline]
+    pub fn frame_data(&self) -> &[u8] {
+        &self.tx_buffer[..self.state.frame_len]
+    }
+
+    /// Handle `DISCONNECT_RESPONSE` and finish (Disconnecting → Idle)
     ///
     /// Always returns to Idle state, even if response indicates error.
     ///
@@ -492,6 +572,7 @@ impl TunnelClient<Disconnecting> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::constants::SERVICE_CONNECTIONSTATE_REQUEST;
 
     #[test]
     fn test_client_creation() {
@@ -505,7 +586,8 @@ mod tests {
         let client = TunnelClient::new([192, 168, 1, 10], 3671);
 
         // Connect (Idle → Connecting)
-        let (client, connect_frame) = client.connect().unwrap();
+        let client = client.connect().unwrap();
+        let connect_frame = client.frame_data();
         assert!(connect_frame.len() >= 26);
         assert_eq!(connect_frame[0], 0x06);
 
@@ -529,20 +611,21 @@ mod tests {
         assert_eq!(client.send_sequence(), 1); // Incremented
 
         // Disconnect (Connected → Disconnecting)
-        let (client, disc_frame) = client.disconnect().unwrap();
+        let client = client.disconnect().unwrap();
+        let disc_frame = client.frame_data();
         assert!(disc_frame.len() >= 16);
 
         // Finish (Disconnecting → Idle)
         let client = client.finish(&[0x05, 0x00]).unwrap();
 
         // Can reconnect!
-        let (_client, _) = client.connect().unwrap();
+        let _client = client.connect().unwrap();
     }
 
     #[test]
     fn test_sequence_wrapping() {
         let client = TunnelClient::new([192, 168, 1, 10], 3671);
-        let (client, _) = client.connect().unwrap();
+        let client = client.connect().unwrap();
 
         let response = [
             0x03, 0x00,
@@ -562,7 +645,7 @@ mod tests {
     #[test]
     fn test_connect_error() {
         let client = TunnelClient::new([192, 168, 1, 10], 3671);
-        let (client, _) = client.connect().unwrap();
+        let client = client.connect().unwrap();
 
         // Error response
         let error_response = [
@@ -573,25 +656,25 @@ mod tests {
 
         let result = client.handle_connect_response(&error_response);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KnxError::ConnectionFailed));
+        assert!(matches!(result.unwrap_err(), KnxError::Connection(_)));
     }
 
     #[test]
     fn test_cancel_connection() {
         let client = TunnelClient::new([192, 168, 1, 10], 3671);
-        let (client, _) = client.connect().unwrap();
+        let client = client.connect().unwrap();
 
         // Cancel and go back to Idle
         let client = client.cancel();
 
         // Can connect again
-        let (_client, _) = client.connect().unwrap();
+        let _client = client.connect().unwrap();
     }
 
     #[test]
     fn test_tunneling_indication() {
         let client = TunnelClient::new([192, 168, 1, 10], 3671);
-        let (client, _) = client.connect().unwrap();
+        let client = client.connect().unwrap();
 
         let response = [
             0x03, 0x00,
@@ -614,7 +697,7 @@ mod tests {
     #[test]
     fn test_sequence_mismatch() {
         let client = TunnelClient::new([192, 168, 1, 10], 3671);
-        let (client, _) = client.connect().unwrap();
+        let client = client.connect().unwrap();
 
         let response = [
             0x03, 0x00,
@@ -634,13 +717,13 @@ mod tests {
 
         let result = client.handle_tunneling_indication(&indication_data);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KnxError::SequenceMismatch));
+        assert!(matches!(result.unwrap_err(), KnxError::Tunneling(_)));
     }
 
     #[test]
     fn test_heartbeat() {
         let client = TunnelClient::new([192, 168, 1, 10], 3671);
-        let (client, _) = client.connect().unwrap();
+        let client = client.connect().unwrap();
 
         let response = [
             0x03, 0x00,
@@ -666,7 +749,7 @@ mod tests {
     #[test]
     fn test_heartbeat_failure() {
         let client = TunnelClient::new([192, 168, 1, 10], 3671);
-        let (client, _) = client.connect().unwrap();
+        let client = client.connect().unwrap();
 
         let response = [
             0x03, 0x00,
@@ -680,13 +763,13 @@ mod tests {
         let result = client.handle_heartbeat_response(&hb_response);
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KnxError::ConnectionLost));
+        assert!(matches!(result.unwrap_err(), KnxError::Connection(_)));
     }
 
     #[test]
     fn test_tunneling_ack() {
         let client = TunnelClient::new([192, 168, 1, 10], 3671);
-        let (client, _) = client.connect().unwrap();
+        let client = client.connect().unwrap();
 
         let response = [
             0x05, 0x00,
@@ -711,7 +794,7 @@ mod tests {
     #[test]
     fn test_finish_now() {
         let client = TunnelClient::new([192, 168, 1, 10], 3671);
-        let (client, _) = client.connect().unwrap();
+        let client = client.connect().unwrap();
 
         let response = [
             0x03, 0x00,
@@ -721,10 +804,10 @@ mod tests {
         let client = client.handle_connect_response(&response).unwrap();
 
         // Emergency disconnect
-        let (client, _) = client.disconnect().unwrap();
+        let client = client.disconnect().unwrap();
         let client = client.finish_now();
 
         // Back to Idle
-        let (_client, _) = client.connect().unwrap();
+        let _client = client.connect().unwrap();
     }
 }

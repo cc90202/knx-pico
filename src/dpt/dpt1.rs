@@ -15,8 +15,8 @@
 //! - **1.001** - Switch (off/on)
 //! - **1.002** - Bool (false/true)
 //! - **1.003** - Enable (disable/enable)
-//! - **1.008** - UpDown (up/down)
-//! - **1.009** - OpenClose (open/close)
+//! - **1.008** - `UpDown` (up/down)
+//! - **1.009** - `OpenClose` (open/close)
 //! - **1.010** - Start (stop/start)
 //!
 //! ## Example
@@ -47,13 +47,13 @@ pub enum Dpt1 {
     Ramp,
     /// DPT 1.005 - Alarm (no alarm/alarm)
     Alarm,
-    /// DPT 1.006 - BinaryValue (low/high)
+    /// DPT 1.006 - `BinaryValue` (low/high)
     BinaryValue,
     /// DPT 1.007 - Step (decrease/increase)
     Step,
-    /// DPT 1.008 - UpDown (up/down)
+    /// DPT 1.008 - `UpDown` (up/down)
     UpDown,
-    /// DPT 1.009 - OpenClose (open/close)
+    /// DPT 1.009 - `OpenClose` (open/close)
     OpenClose,
     /// DPT 1.010 - Start (stop/start)
     Start,
@@ -80,7 +80,7 @@ impl DptEncode<bool> for Dpt1 {
 impl DptDecode<bool> for Dpt1 {
     fn decode(&self, data: &[u8]) -> Result<bool> {
         if data.is_empty() {
-            return Err(KnxError::InvalidDptData);
+            return Err(KnxError::invalid_dpt_data());
         }
 
         // Only the LSB matters, mask out upper bits
@@ -110,7 +110,7 @@ impl Dpt1 {
 
     /// Get semantic labels for false/true values
     ///
-    /// Returns a tuple (false_label, true_label)
+    /// Returns a tuple (`false_label`, `true_label`)
     pub const fn labels(&self) -> (&'static str, &'static str) {
         match self {
             Dpt1::Switch => ("off", "on"),
@@ -171,7 +171,7 @@ mod tests {
     fn test_decode_empty_data() {
         let result = Dpt1::Switch.decode(&[]);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KnxError::InvalidDptData));
+        assert!(matches!(result.unwrap_err(), KnxError::Dpt(_)));
     }
 
     #[test]

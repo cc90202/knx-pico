@@ -41,68 +41,68 @@ pub const SERVICE_TUNNELING_ACK: u16 = 0x0421;
 #[repr(u16)]
 pub enum ServiceType {
     // Core services (0x02xx)
-    /// SEARCH_REQUEST - Device discovery request
+    /// `SEARCH_REQUEST` - Device discovery request
     SearchRequest = 0x0201,
-    /// SEARCH_RESPONSE - Device discovery response
+    /// `SEARCH_RESPONSE` - Device discovery response
     SearchResponse = 0x0202,
-    /// DESCRIPTION_REQUEST - Device description request
+    /// `DESCRIPTION_REQUEST` - Device description request
     DescriptionRequest = 0x0203,
-    /// DESCRIPTION_RESPONSE - Device description response
+    /// `DESCRIPTION_RESPONSE` - Device description response
     DescriptionResponse = 0x0204,
-    /// CONNECT_REQUEST - Connection request
+    /// `CONNECT_REQUEST` - Connection request
     ConnectRequest = 0x0205,
-    /// CONNECT_RESPONSE - Connection response
+    /// `CONNECT_RESPONSE` - Connection response
     ConnectResponse = 0x0206,
-    /// CONNECTIONSTATE_REQUEST - Connection state request (heartbeat)
+    /// `CONNECTIONSTATE_REQUEST` - Connection state request (heartbeat)
     ConnectionstateRequest = 0x0207,
-    /// CONNECTIONSTATE_RESPONSE - Connection state response
+    /// `CONNECTIONSTATE_RESPONSE` - Connection state response
     ConnectionstateResponse = 0x0208,
-    /// DISCONNECT_REQUEST - Disconnect request
+    /// `DISCONNECT_REQUEST` - Disconnect request
     DisconnectRequest = 0x0209,
-    /// DISCONNECT_RESPONSE - Disconnect response
+    /// `DISCONNECT_RESPONSE` - Disconnect response
     DisconnectResponse = 0x020A,
 
     // Device Management (0x03xx)
-    /// DEVICE_CONFIGURATION_REQUEST
+    /// `DEVICE_CONFIGURATION_REQUEST`
     DeviceConfigurationRequest = 0x0310,
-    /// DEVICE_CONFIGURATION_ACK
+    /// `DEVICE_CONFIGURATION_ACK`
     DeviceConfigurationAck = 0x0311,
 
     // Tunnelling (0x04xx)
-    /// TUNNELLING_REQUEST - Tunnelling data request
+    /// `TUNNELLING_REQUEST` - Tunnelling data request
     TunnellingRequest = 0x0420,
-    /// TUNNELLING_ACK - Tunnelling acknowledgement
+    /// `TUNNELLING_ACK` - Tunnelling acknowledgement
     TunnellingAck = 0x0421,
 
     // Routing (0x05xx)
-    /// ROUTING_INDICATION - Routing indication (multicast)
+    /// `ROUTING_INDICATION` - Routing indication (multicast)
     RoutingIndication = 0x0530,
-    /// ROUTING_LOST_MESSAGE - Routing lost message indication
+    /// `ROUTING_LOST_MESSAGE` - Routing lost message indication
     RoutingLostMessage = 0x0531,
-    /// ROUTING_BUSY - Routing busy indication
+    /// `ROUTING_BUSY` - Routing busy indication
     RoutingBusy = 0x0532,
 
     // Remote Logging (0x06xx)
-    /// REMOTE_DIAGNOSTIC_REQUEST
+    /// `REMOTE_DIAGNOSTIC_REQUEST`
     RemoteDiagnosticRequest = 0x0740,
-    /// REMOTE_DIAGNOSTIC_RESPONSE
+    /// `REMOTE_DIAGNOSTIC_RESPONSE`
     RemoteDiagnosticResponse = 0x0741,
 
     // Secure services (0x09xx)
-    /// SECURE_WRAPPER - Secure session wrapper
+    /// `SECURE_WRAPPER` - Secure session wrapper
     SecureWrapper = 0x0950,
-    /// SESSION_REQUEST - Secure session request
+    /// `SESSION_REQUEST` - Secure session request
     SessionRequest = 0x0951,
-    /// SESSION_RESPONSE - Secure session response
+    /// `SESSION_RESPONSE` - Secure session response
     SessionResponse = 0x0952,
-    /// SESSION_AUTHENTICATE - Secure session authentication
+    /// `SESSION_AUTHENTICATE` - Secure session authentication
     SessionAuthenticate = 0x0953,
-    /// SESSION_STATUS - Secure session status
+    /// `SESSION_STATUS` - Secure session status
     SessionStatus = 0x0954,
 }
 
 impl ServiceType {
-    /// Convert a u16 to ServiceType
+    /// Convert a u16 to `ServiceType`
     pub const fn from_u16(value: u16) -> Option<Self> {
         match value {
             0x0201 => Some(Self::SearchRequest),
@@ -133,7 +133,7 @@ impl ServiceType {
         }
     }
 
-    /// Convert ServiceType to u16
+    /// Convert `ServiceType` to u16
     pub const fn to_u16(self) -> u16 {
         self as u16
     }
@@ -143,19 +143,19 @@ impl ServiceType {
 // Connection Type Codes
 // =============================================================================
 
-/// Connection type for DEVICE_MGMT_CONNECTION
+/// Connection type for `DEVICE_MGMT_CONNECTION`
 pub const DEVICE_MGMT_CONNECTION: u8 = 0x03;
 
-/// Connection type for TUNNEL_CONNECTION
+/// Connection type for `TUNNEL_CONNECTION`
 pub const TUNNEL_CONNECTION: u8 = 0x04;
 
-/// Connection type for REMLOG_CONNECTION
+/// Connection type for `REMLOG_CONNECTION`
 pub const REMLOG_CONNECTION: u8 = 0x06;
 
-/// Connection type for REMCONF_CONNECTION
+/// Connection type for `REMCONF_CONNECTION`
 pub const REMCONF_CONNECTION: u8 = 0x07;
 
-/// Connection type for OBJSVR_CONNECTION
+/// Connection type for `OBJSVR_CONNECTION`
 pub const OBJSVR_CONNECTION: u8 = 0x08;
 
 // =============================================================================
@@ -202,28 +202,28 @@ pub const E_TUNNELLING_LAYER: u8 = 0x29;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(u8)]
 pub enum CEMIMessageCode {
-    /// L_Raw.req - Raw frame request
+    /// `L_Raw.req` - Raw frame request
     LRawReq = 0x10,
-    /// L_Data.req - Data request
+    /// `L_Data.req` - Data request
     LDataReq = 0x11,
-    /// L_Poll_Data.req - Poll data request
+    /// `L_Poll_Data.req` - Poll data request
     LPollDataReq = 0x13,
-    /// L_Raw.ind - Raw frame indication
+    /// `L_Raw.ind` - Raw frame indication
     LRawInd = 0x2D,
-    /// L_Data.ind - Data indication
+    /// `L_Data.ind` - Data indication
     LDataInd = 0x29,
-    /// L_Busmon.ind - Bus monitor indication
+    /// `L_Busmon.ind` - Bus monitor indication
     LBusmonInd = 0x2B,
-    /// L_Raw.con - Raw frame confirmation
+    /// `L_Raw.con` - Raw frame confirmation
     LRawCon = 0x2F,
-    /// L_Data.con - Data confirmation
+    /// `L_Data.con` - Data confirmation
     LDataCon = 0x2E,
-    /// L_Poll_Data.con - Poll data confirmation
+    /// `L_Poll_Data.con` - Poll data confirmation
     LPollDataCon = 0x25,
 }
 
 impl CEMIMessageCode {
-    /// Convert u8 to CEMIMessageCode
+    /// Convert u8 to `CEMIMessageCode`
     pub const fn from_u8(value: u8) -> Option<Self> {
         match value {
             0x10 => Some(Self::LRawReq),
@@ -239,7 +239,7 @@ impl CEMIMessageCode {
         }
     }
 
-    /// Convert CEMIMessageCode to u8
+    /// Convert `CEMIMessageCode` to u8
     pub const fn to_u8(self) -> u8 {
         self as u8
     }

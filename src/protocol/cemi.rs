@@ -1,9 +1,16 @@
 //! Common External Message Interface (cEMI) implementation.
 //!
-//! cEMI is the standardized interface for KNX communication, encapsulating
-//! KNX telegrams within KNXnet/IP frames.
+//! cEMI provides the standardized interface for KNX communication, encapsulating
+//! KNX telegrams within KNXnet/IP frames. This module handles parsing and building
+//! of cEMI frames, including `L_Data` frames for group communication.
 //!
-//! # Frame Structure
+//! ## Overview
+//!
+//! The cEMI protocol layer sits between KNXnet/IP (transport) and the KNX
+//! application layer. It defines how to encode KNX telegrams for transmission
+//! over IP networks.
+//!
+//! ## Frame Structure
 //!
 //! ```text
 //! ┌──────────────────────────────────────────┐
@@ -22,6 +29,25 @@
 //! │  ├─ TPCI/APCI (1-2 bytes)                │
 //! │  └─ Data (variable)                      │
 //! └──────────────────────────────────────────┘
+//! ```
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use knx_rs::protocol::cemi::{CEMIFrame, LDataFrame};
+//!
+//! // Parse a complete cEMI frame
+//! let cemi = CEMIFrame::parse(&frame_data)?;
+//!
+//! // Extract L_Data if this is a data frame
+//! if cemi.is_ldata() {
+//!     let ldata = cemi.as_ldata()?;
+//!
+//!     if ldata.is_group_write() {
+//!         let addr = ldata.destination_group().unwrap();
+//!         // Process group write...
+//!     }
+//! }
 //! ```
 
 use crate::addressing::{GroupAddress, IndividualAddress};
@@ -45,11 +71,11 @@ pub enum AdditionalInfoType {
     TimeDelay = 0x05,
     /// Extended relative timestamp
     ExtendedRelativeTimestamp = 0x06,
-    /// BiBat information
+    /// `BiBat` information
     BiBatInfo = 0x07,
 }
 
-/// Control Field 1 of L_Data frame
+/// Control Field 1 of `L_Data` frame
 ///
 /// ```text
 /// Bit 7: Frame Type (0=extended, 1=standard)
@@ -170,7 +196,7 @@ impl Default for ControlField1 {
     }
 }
 
-/// Control Field 2 of L_Data frame
+/// Control Field 2 of `L_Data` frame
 ///
 /// ```text
 /// Bit 7: Destination Address Type (0=individual, 1=group)
@@ -291,11 +317,11 @@ impl Tpci {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Apci {
-    /// Group Value Read (A_GroupValue_Read)
+    /// Group Value Read (`A_GroupValue_Read`)
     GroupValueRead,
-    /// Group Value Response (A_GroupValue_Response)
+    /// Group Value Response (`A_GroupValue_Response`)
     GroupValueResponse,
-    /// Group Value Write (A_GroupValue_Write)
+    /// Group Value Write (`A_GroupValue_Write`)
     GroupValueWrite,
     /// Individual Address Write
     IndividualAddressWrite,
@@ -373,7 +399,7 @@ impl Apci {
     }
 }
 
-/// cEMI L_Data frame
+/// cEMI `L_Data` frame
 ///
 /// This is the most common cEMI frame type, used for transmitting
 /// KNX telegrams over KNXnet/IP.
@@ -399,11 +425,11 @@ pub struct LDataFrame<'a> {
 }
 
 impl<'a> LDataFrame<'a> {
-    /// Minimum size of L_Data frame (without additional data bytes)
-    /// Control1 + Control2 + Source(2) + Dest(2) + NPDUlen + TPCI + APCI = 9 bytes
+    /// Minimum size of `L_Data` frame (without additional data bytes)
+    /// Control1 + Control2 + Source(2) + Dest(2) + `NPDUlen` + TPCI + APCI = 9 bytes
     pub const MIN_SIZE: usize = 9;
 
-    /// Parse L_Data frame from bytes
+    /// Parse `L_Data` frame from bytes
     ///
     /// # Errors
     ///
@@ -411,7 +437,7 @@ impl<'a> LDataFrame<'a> {
     #[inline(always)]
     pub fn parse(data: &'a [u8]) -> Result<Self> {
         if data.len() < Self::MIN_SIZE {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let ctrl1 = ControlField1::from(data[0]);
@@ -442,7 +468,7 @@ impl<'a> LDataFrame<'a> {
         let npdu_end = 7 + npdu_length as usize;
 
         if data.len() < npdu_end {
-            return Err(KnxError::InvalidFrame);
+            return Err(KnxError::invalid_frame());
         }
 
         let app_data = &data[data_start..npdu_end];
@@ -462,21 +488,13 @@ impl<'a> LDataFrame<'a> {
     /// Get destination as group address (if applicable)
     #[inline]
     pub fn destination_group(&self) -> Option<GroupAddress> {
-        if self.ctrl2.is_group_address() {
-            Some(GroupAddress::from(self.destination_raw))
-        } else {
-            None
-        }
+        self.ctrl2.is_group_address().then(|| GroupAddress::from(self.destination_raw))
     }
 
     /// Get destination as individual address (if applicable)
     #[inline]
     pub fn destination_individual(&self) -> Option<IndividualAddress> {
-        if !self.ctrl2.is_group_address() {
-            Some(IndividualAddress::from(self.destination_raw))
-        } else {
-            None
-        }
+        (!self.ctrl2.is_group_address()).then(|| IndividualAddress::from(self.destination_raw))
     }
 
     /// Check if this is a group value write
@@ -521,10 +539,10 @@ impl<'a> CEMIFrame<'a> {
     #[inline(always)]
     pub fn parse(data: &'a [u8]) -> Result<Self> {
         if data.len() < Self::MIN_SIZE {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
-        let message_code = CEMIMessageCode::from_u8(data[0]).ok_or(KnxError::InvalidMessageCode)?;
+        let message_code = CEMIMessageCode::from_u8(data[0]).ok_or_else(KnxError::invalid_message_code)?;
 
         Ok(Self { message_code, data })
     }
@@ -544,24 +562,24 @@ impl<'a> CEMIFrame<'a> {
 
     /// Get the service information (skipping message code and additional info)
     ///
-    /// This returns the L_Data payload for data frames.
+    /// This returns the `L_Data` payload for data frames.
     #[inline]
     pub fn service_info(&self) -> Result<&[u8]> {
         let add_info_len = self.additional_info_length();
         let service_start = 2 + add_info_len as usize;
 
         if self.data.len() < service_start {
-            return Err(KnxError::InvalidFrame);
+            return Err(KnxError::invalid_frame());
         }
 
         Ok(&self.data[service_start..])
     }
 
-    /// Parse as L_Data frame (for L_Data.req, L_Data.ind, L_Data.con)
+    /// Parse as `L_Data` frame (for `L_Data.req`, `L_Data.ind`, `L_Data.con`)
     ///
     /// # Errors
     ///
-    /// Returns error if this is not an L_Data frame or parsing fails
+    /// Returns error if this is not an `L_Data` frame or parsing fails
     pub fn as_ldata(&self) -> Result<LDataFrame<'a>> {
         match self.message_code {
             CEMIMessageCode::LDataReq | CEMIMessageCode::LDataInd | CEMIMessageCode::LDataCon => {
@@ -570,17 +588,17 @@ impl<'a> CEMIFrame<'a> {
                 let service_start = 2 + add_info_len as usize;
 
                 if self.data.len() < service_start {
-                    return Err(KnxError::InvalidFrame);
+                    return Err(KnxError::invalid_frame());
                 }
 
                 // Parse directly from data with correct lifetime
                 LDataFrame::parse(&self.data[service_start..])
             }
-            _ => Err(KnxError::InvalidMessageCode),
+            _ => Err(KnxError::invalid_message_code()),
         }
     }
 
-    /// Check if this is an L_Data frame
+    /// Check if this is an `L_Data` frame
     pub const fn is_ldata(&self) -> bool {
         matches!(
             self.message_code,

@@ -16,26 +16,35 @@
 //! ```rust,no_run
 //! use knx_rs::dpt::{Dpt1, Dpt5, Dpt7, Dpt9, Dpt13, DptEncode, DptDecode};
 //!
-//! // Boolean value
+//! // Boolean value - uses encode() returning &'static [u8]
 //! let data = Dpt1::Switch.encode(true)?;
 //! let value = Dpt1::Switch.decode(&data)?;
 //!
-//! // Percentage (0-100%)
+//! // For multi-byte types, use specific methods:
+//!
+//! // Percentage (0-100%) - returns owned byte
 //! let byte = Dpt5::Percentage.encode_to_byte(75)?;
 //! let value = Dpt5::Percentage.decode(&[byte])?;
 //!
-//! // Brightness (lux)
+//! // Brightness (lux) - returns owned array
 //! let bytes = Dpt7::Brightness.encode_to_bytes(5000)?;
 //! let lux = Dpt7::Brightness.decode(&bytes)?;
 //!
-//! // Temperature (°C)
+//! // Temperature (°C) - returns owned array
 //! let bytes = Dpt9::Temperature.encode_to_bytes(21.5)?;
 //! let temp = Dpt9::Temperature.decode_from_bytes(&bytes)?;
 //!
-//! // Active energy (Wh)
+//! // Active energy (Wh) - returns owned array
 //! let bytes = Dpt13::ActiveEnergy.encode_to_bytes(500000)?;
 //! let wh = Dpt13::ActiveEnergy.decode(&bytes)?;
 //! ```
+//!
+//! ## Design Note
+//!
+//! The `DptEncode` trait returns `&'static [u8]` which works well for simple
+//! types (like DPT1 with only 2 possible values), but not for types with many
+//! possible values. For those, use the type-specific `encode_to_byte()` or
+//! `encode_to_bytes()` methods that return owned data.
 
 use crate::error::Result;
 
@@ -46,13 +55,22 @@ pub mod dpt9;
 pub mod dpt13;
 
 // Re-export common types
+#[doc(inline)]
 pub use dpt1::Dpt1;
+#[doc(inline)]
 pub use dpt5::Dpt5;
+#[doc(inline)]
 pub use dpt7::Dpt7;
+#[doc(inline)]
 pub use dpt9::Dpt9;
+#[doc(inline)]
 pub use dpt13::Dpt13;
 
 /// Trait for encoding values to KNX data format
+///
+/// This trait is mainly for documentation and type checking.
+/// Actual encoding should use the type-specific methods like
+/// `encode_to_byte()`, `encode_to_bytes()`, etc.
 pub trait DptEncode<T> {
     /// Encode a value to KNX byte representation
     ///
@@ -61,6 +79,11 @@ pub trait DptEncode<T> {
     ///
     /// # Returns
     /// A byte array containing the encoded value
+    ///
+    /// # Note
+    /// This method may not be implemented for all DPT types due to
+    /// the limitation of returning `&'static [u8]`. Use type-specific
+    /// methods like `encode_to_byte()` or `encode_to_bytes()` instead.
     fn encode(&self, value: T) -> Result<&'static [u8]>;
 }
 

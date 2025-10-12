@@ -96,24 +96,24 @@ impl Dpt5 {
         let (min, max) = self.range();
 
         if value > max {
-            return Err(KnxError::DptValueOutOfRange);
+            return Err(KnxError::dpt_value_out_of_range());
         }
 
         let scaled = match self {
             Dpt5::Percentage => {
                 // 0-100% -> 0-255
                 // scaled = value * 255 / 100
-                ((value as u32 * 255) / 100) as u8
+                ((u32::from(value) * 255) / 100) as u8
             }
             Dpt5::Angle => {
                 // 0-360° -> 0-255
                 // scaled = value * 255 / 360
-                ((value as u32 * 255) / 360) as u8
+                ((u32::from(value) * 255) / 360) as u8
             }
             // Direct mapping for others
             Dpt5::PercentU8 | Dpt5::Ratio | Dpt5::Counter | Dpt5::Tariff => {
                 if value < min || value > max {
-                    return Err(KnxError::DptValueOutOfRange);
+                    return Err(KnxError::dpt_value_out_of_range());
                 }
                 value as u8
             }
@@ -131,22 +131,22 @@ impl Dpt5 {
             Dpt5::Percentage => {
                 // 0-255 -> 0-100%
                 // value = raw * 100 / 255
-                ((raw as u32 * 100) / 255) as u16
+                ((u32::from(raw) * 100) / 255) as u16
             }
             Dpt5::Angle => {
                 // 0-255 -> 0-360°
                 // value = raw * 360 / 255
-                ((raw as u32 * 360) / 255) as u16
+                ((u32::from(raw) * 360) / 255) as u16
             }
             Dpt5::Tariff => {
                 // Tariff has max 254
                 if raw > 254 {
-                    return Err(KnxError::DptValueOutOfRange);
+                    return Err(KnxError::dpt_value_out_of_range());
                 }
-                raw as u16
+                u16::from(raw)
             }
             // Direct mapping for others
-            Dpt5::PercentU8 | Dpt5::Ratio | Dpt5::Counter => raw as u16,
+            Dpt5::PercentU8 | Dpt5::Ratio | Dpt5::Counter => u16::from(raw),
         };
 
         Ok(value)
@@ -166,7 +166,7 @@ impl DptEncode<u16> for Dpt5 {
 impl DptDecode<u16> for Dpt5 {
     fn decode(&self, data: &[u8]) -> Result<u16> {
         if data.is_empty() {
-            return Err(KnxError::InvalidDptData);
+            return Err(KnxError::invalid_dpt_data());
         }
 
         self.decode_scaled(data[0])
@@ -233,7 +233,7 @@ mod tests {
     fn test_percentage_out_of_range() {
         let result = Dpt5::Percentage.encode_to_byte(101);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KnxError::DptValueOutOfRange));
+        assert!(matches!(result.unwrap_err(), KnxError::Dpt(_)));
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod tests {
     fn test_decode_empty_data() {
         let result = Dpt5::Percentage.decode(&[]);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KnxError::InvalidDptData));
+        assert!(matches!(result.unwrap_err(), KnxError::Dpt(_)));
     }
 
     #[test]

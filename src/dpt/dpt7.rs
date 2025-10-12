@@ -161,7 +161,7 @@ impl Dpt7 {
     #[inline]
     fn decode_raw(&self, data: &[u8]) -> Result<u16> {
         if data.len() < 2 {
-            return Err(KnxError::InvalidDptData);
+            return Err(KnxError::invalid_dpt_data());
         }
 
         // SAFETY: We just validated that data.len() >= 2
@@ -338,12 +338,12 @@ mod tests {
         // Empty data
         let result = Dpt7::Pulses.decode(&[]);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KnxError::InvalidDptData));
+        assert!(matches!(result.unwrap_err(), KnxError::Dpt(_)));
 
         // Too short (1 byte)
         let result = Dpt7::Pulses.decode(&[0x42]);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KnxError::InvalidDptData));
+        assert!(matches!(result.unwrap_err(), KnxError::Dpt(_)));
     }
 
     #[test]

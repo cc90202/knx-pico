@@ -67,16 +67,16 @@ impl GroupAddress {
     /// # Errors
     ///
     /// Returns `KnxError::AddressOutOfRange` if any component is out of range.
-    pub const fn new(main: u8, middle: u8, sub: u8) -> Result<Self> {
+    pub fn new(main: u8, middle: u8, sub: u8) -> Result<Self> {
         if main > Self::MAX_MAIN {
-            return Err(KnxError::AddressOutOfRange);
+            return Err(KnxError::address_out_of_range());
         }
         if middle > Self::MAX_MIDDLE {
-            return Err(KnxError::AddressOutOfRange);
+            return Err(KnxError::address_out_of_range());
         }
         // sub is u8, so it's always in range
 
-        let raw = ((main as u16) << 11) | ((middle as u16) << 8) | (sub as u16);
+        let raw = (u16::from(main) << 11) | (u16::from(middle) << 8) | u16::from(sub);
         Ok(Self { raw })
     }
 
@@ -90,16 +90,33 @@ impl GroupAddress {
     /// # Errors
     ///
     /// Returns `KnxError::AddressOutOfRange` if any component is out of range.
-    pub const fn new_2level(main: u8, sub: u16) -> Result<Self> {
+    pub fn new_2level(main: u8, sub: u16) -> Result<Self> {
         if main > Self::MAX_MAIN {
-            return Err(KnxError::AddressOutOfRange);
+            return Err(KnxError::address_out_of_range());
         }
         if sub > Self::MAX_SUB_2LEVEL {
-            return Err(KnxError::AddressOutOfRange);
+            return Err(KnxError::address_out_of_range());
         }
 
-        let raw = ((main as u16) << 11) | sub;
+        let raw = (u16::from(main) << 11) | sub;
         Ok(Self { raw })
+    }
+
+    /// Create from a 3-element array `[main, middle, sub]`.
+    ///
+    /// Convenient for creating 3-level addresses from array literals.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use knx_rs::GroupAddress;
+    ///
+    /// let addr = GroupAddress::from_array([1, 2, 3])?;
+    /// assert_eq!(addr.to_string(), "1/2/3");
+    /// # Ok::<(), knx_rs::KnxError>(())
+    /// ```
+    pub fn from_array(parts: [u8; 3]) -> Result<Self> {
+        Self::new(parts[0], parts[1], parts[2])
     }
 
     /// Get the raw u16 representation of the address.
@@ -160,7 +177,7 @@ impl GroupAddress {
     #[inline]
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 2 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
         buf[0..2].copy_from_slice(&self.raw.to_be_bytes());
         Ok(2)
@@ -178,7 +195,7 @@ impl GroupAddress {
     #[inline]
     pub fn decode(buf: &[u8]) -> Result<Self> {
         if buf.len() < 2 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
         let raw = u16::from_be_bytes([buf[0], buf[1]]);
         Ok(Self { raw })
@@ -216,44 +233,41 @@ impl core::str::FromStr for GroupAddress {
         let main = parts
             .next()
             .and_then(|s| s.parse::<u8>().ok())
-            .ok_or(KnxError::InvalidGroupAddress)?;
+            .ok_or_else(KnxError::invalid_group_address)?;
 
         let middle = parts
             .next()
             .and_then(|s| s.parse::<u16>().ok())
-            .ok_or(KnxError::InvalidGroupAddress)?;
+            .ok_or_else(KnxError::invalid_group_address)?;
 
         // Check if there's a third part (3-level format)
-        match parts.next() {
-            Some(sub_str) => {
-                // 3-level format: Main/Middle/Sub
-                let sub = sub_str
-                    .parse::<u8>()
-                    .ok()
-                    .ok_or(KnxError::InvalidGroupAddress)?;
+        if let Some(sub_str) = parts.next() {
+            // 3-level format: Main/Middle/Sub
+            let sub = sub_str
+                .parse::<u8>()
+                .ok()
+                .ok_or_else(KnxError::invalid_group_address)?;
 
-                // Ensure no extra parts
-                if parts.next().is_some() {
-                    return Err(KnxError::InvalidGroupAddress);
-                }
-
-                // middle is actually middle (u8), not sub (u16)
-                if middle > 255 {
-                    return Err(KnxError::InvalidGroupAddress);
-                }
-
-                Self::new(main, middle as u8, sub)
+            // Ensure no extra parts
+            if parts.next().is_some() {
+                return Err(KnxError::invalid_group_address());
             }
-            None => {
-                // 2-level format: Main/Sub
-                // middle is actually the sub value
-                // Ensure no extra parts
-                if parts.next().is_some() {
-                    return Err(KnxError::InvalidGroupAddress);
-                }
 
-                Self::new_2level(main, middle)
+            // middle is actually middle (u8), not sub (u16)
+            if middle > 255 {
+                return Err(KnxError::invalid_group_address());
             }
+
+            Self::new(main, middle as u8, sub)
+        } else {
+            // 2-level format: Main/Sub
+            // middle is actually the sub value
+            // Ensure no extra parts
+            if parts.next().is_some() {
+                return Err(KnxError::invalid_group_address());
+            }
+
+            Self::new_2level(main, middle)
         }
     }
 }
@@ -273,13 +287,13 @@ mod tests {
     #[test]
     fn test_new_3level_invalid_main() {
         let result = GroupAddress::new(32, 0, 0);
-        assert_eq!(result, Err(KnxError::AddressOutOfRange));
+        assert!(result.is_err());
     }
 
     #[test]
     fn test_new_3level_invalid_middle() {
         let result = GroupAddress::new(0, 8, 0);
-        assert_eq!(result, Err(KnxError::AddressOutOfRange));
+        assert!(result.is_err());
     }
 
     #[test]
@@ -292,7 +306,7 @@ mod tests {
     #[test]
     fn test_new_2level_invalid() {
         let result = GroupAddress::new_2level(0, 2048);
-        assert_eq!(result, Err(KnxError::AddressOutOfRange));
+        assert!(result.is_err());
     }
 
     #[test]

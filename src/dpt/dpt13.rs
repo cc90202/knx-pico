@@ -11,8 +11,8 @@
 //! - **13.001** - Counter Pulses (signed)
 //! - **13.002** - Flow Rate (l/h)
 //! - **13.010** - Active Energy (Wh)
-//! - **13.011** - Apparent Energy (VAh)
-//! - **13.012** - Reactive Energy (VArh)
+//! - **13.011** - Apparent Energy (`VAh`)
+//! - **13.012** - Reactive Energy (`VArh`)
 //! - **13.013** - Active Energy (kWh)
 //! - **13.014** - Apparent Energy (kVAh)
 //! - **13.015** - Reactive Energy (kVArh)
@@ -45,9 +45,9 @@ pub enum Dpt13 {
     FlowRate,
     /// DPT 13.010 - Active Energy (Wh)
     ActiveEnergy,
-    /// DPT 13.011 - Apparent Energy (VAh)
+    /// DPT 13.011 - Apparent Energy (`VAh`)
     ApparentEnergy,
-    /// DPT 13.012 - Reactive Energy (VArh)
+    /// DPT 13.012 - Reactive Energy (`VArh`)
     ReactiveEnergy,
     /// DPT 13.013 - Active Energy (kWh)
     ActiveEnergyKwh,
@@ -151,7 +151,7 @@ impl Dpt13 {
     #[inline]
     fn decode_raw(&self, data: &[u8]) -> Result<i32> {
         if data.len() < 4 {
-            return Err(KnxError::InvalidDptData);
+            return Err(KnxError::invalid_dpt_data());
         }
 
         // SAFETY: We just validated that data.len() >= 4
@@ -356,7 +356,7 @@ mod tests {
         // Empty data
         let result = Dpt13::Counter.decode(&[]);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KnxError::InvalidDptData));
+        assert!(matches!(result.unwrap_err(), KnxError::Dpt(_)));
 
         // Too short (1 byte)
         let result = Dpt13::Counter.decode(&[0x42]);

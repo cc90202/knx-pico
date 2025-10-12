@@ -1,36 +1,61 @@
-//! KNXnet/IP Service Request/Response builders
+//! KNXnet/IP service request and response builders.
 //!
-//! This module provides builders for constructing KNXnet/IP service frames
-//! for tunneling communication.
+//! This module provides zero-copy builders for constructing KNXnet/IP service
+//! frames used in tunneling communication. All builders work with provided
+//! buffers to avoid heap allocations, making them suitable for embedded systems.
 //!
 //! ## Supported Services
 //!
-//! - CONNECT_REQUEST/RESPONSE - Establish tunnel connection
-//! - CONNECTIONSTATE_REQUEST/RESPONSE - Heartbeat/keep-alive
-//! - DISCONNECT_REQUEST/RESPONSE - Close connection
-//! - TUNNELING_REQUEST/ACK - Send/receive KNX telegrams
+//! - **CONNECT** - Establish tunnel connection with gateway
+//! - **CONNECTIONSTATE** - Heartbeat/keep-alive checks
+//! - **DISCONNECT** - Clean connection shutdown
+//! - **TUNNELING** - Send/receive KNX telegrams through tunnel
 //!
 //! ## Example
 //!
 //! ```rust,no_run
 //! use knx_rs::protocol::services::ConnectRequest;
+//! use knx_rs::protocol::frame::Hpai;
 //!
-//! let request = ConnectRequest::new(
-//!     control_endpoint,
-//!     data_endpoint,
-//! );
+//! // Build a connection request
+//! let control = Hpai::new([192, 168, 1, 100], 3671);
+//! let data = Hpai::new([192, 168, 1, 100], 3671);
+//! let request = ConnectRequest::new(control, data);
+//!
+//! // Encode to buffer
+//! let mut buffer = [0u8; 32];
+//! let len = request.build(&mut buffer)?;
+//! // Send buffer[..len] to gateway
+//! ```
+//!
+//! ## Protocol Flow
+//!
+//! ```text
+//! Client                          Gateway
+//!   |                                |
+//!   |------- CONNECT_REQUEST ------->|
+//!   |<------ CONNECT_RESPONSE -------|
+//!   |                                |
+//!   |------ TUNNELING_REQUEST ------>|
+//!   |<------ TUNNELING_ACK ----------|
+//!   |                                |
+//!   |--- CONNECTIONSTATE_REQUEST --->|  (every 60s)
+//!   |<-- CONNECTIONSTATE_RESPONSE ---|
+//!   |                                |
+//!   |------ DISCONNECT_REQUEST ----->|
+//!   |<----- DISCONNECT_RESPONSE -----|
 //! ```
 
 use crate::error::{KnxError, Result};
-use crate::protocol::constants::*;
+use crate::protocol::constants::{SERVICE_CONNECT_REQUEST, SERVICE_CONNECTIONSTATE_REQUEST, SERVICE_DISCONNECT_REQUEST, SERVICE_TUNNELING_REQUEST, SERVICE_TUNNELING_ACK};
 use crate::protocol::frame::Hpai;
 
 /// Connection Request Information (CRI) for tunneling
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConnectionRequestInfo {
-    /// Connection type (TUNNEL_CONNECTION = 0x04)
+    /// Connection type (`TUNNEL_CONNECTION` = 0x04)
     pub connection_type: u8,
-    /// KNX layer (TUNNEL_LINKLAYER = 0x02)
+    /// KNX layer (`TUNNEL_LINKLAYER` = 0x02)
     pub knx_layer: u8,
 }
 
@@ -46,7 +71,7 @@ impl ConnectionRequestInfo {
     /// Encode CRI to bytes
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 4 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         buf[0] = 4; // Structure length
@@ -60,12 +85,12 @@ impl ConnectionRequestInfo {
     /// Decode CRI from bytes
     pub fn decode(data: &[u8]) -> Result<Self> {
         if data.len() < 4 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let length = data[0];
         if length != 4 {
-            return Err(KnxError::InvalidFrame);
+            return Err(KnxError::invalid_frame());
         }
 
         Ok(Self {
@@ -75,7 +100,7 @@ impl ConnectionRequestInfo {
     }
 }
 
-/// CONNECT_REQUEST service (0x0205)
+/// `CONNECT_REQUEST` service (0x0205)
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectRequest {
     /// Control endpoint (for connection management)
@@ -87,7 +112,7 @@ pub struct ConnectRequest {
 }
 
 impl ConnectRequest {
-    /// Create a new CONNECT_REQUEST
+    /// Create a new `CONNECT_REQUEST`
     pub const fn new(control_endpoint: Hpai, data_endpoint: Hpai) -> Self {
         Self {
             control_endpoint,
@@ -101,7 +126,7 @@ impl ConnectRequest {
     /// Returns the number of bytes written to the buffer
     pub fn build(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 26 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let mut offset = 0;
@@ -129,7 +154,7 @@ impl ConnectRequest {
     }
 }
 
-/// CONNECT_RESPONSE service (0x0206)
+/// `CONNECT_RESPONSE` service (0x0206)
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectResponse {
     /// Communication channel ID
@@ -146,7 +171,7 @@ impl ConnectResponse {
     /// Parse from frame body
     pub fn parse(data: &[u8]) -> Result<Self> {
         if data.len() < 14 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let channel_id = data[0];
@@ -170,7 +195,7 @@ impl ConnectResponse {
     }
 }
 
-/// CONNECTIONSTATE_REQUEST service (0x0207)
+/// `CONNECTIONSTATE_REQUEST` service (0x0207)
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectionStateRequest {
     /// Communication channel ID
@@ -180,7 +205,7 @@ pub struct ConnectionStateRequest {
 }
 
 impl ConnectionStateRequest {
-    /// Create a new CONNECTIONSTATE_REQUEST
+    /// Create a new `CONNECTIONSTATE_REQUEST`
     pub const fn new(channel_id: u8, control_endpoint: Hpai) -> Self {
         Self {
             channel_id,
@@ -191,7 +216,7 @@ impl ConnectionStateRequest {
     /// Build the complete frame
     pub fn build(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 16 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let mut offset = 0;
@@ -217,7 +242,7 @@ impl ConnectionStateRequest {
     }
 }
 
-/// CONNECTIONSTATE_RESPONSE service (0x0208)
+/// `CONNECTIONSTATE_RESPONSE` service (0x0208)
 #[derive(Debug, Clone, Copy)]
 pub struct ConnectionStateResponse {
     /// Communication channel ID
@@ -230,7 +255,7 @@ impl ConnectionStateResponse {
     /// Parse from frame body
     pub fn parse(data: &[u8]) -> Result<Self> {
         if data.len() < 2 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         Ok(Self {
@@ -245,7 +270,7 @@ impl ConnectionStateResponse {
     }
 }
 
-/// DISCONNECT_REQUEST service (0x0209)
+/// `DISCONNECT_REQUEST` service (0x0209)
 #[derive(Debug, Clone, Copy)]
 pub struct DisconnectRequest {
     /// Communication channel ID
@@ -255,7 +280,7 @@ pub struct DisconnectRequest {
 }
 
 impl DisconnectRequest {
-    /// Create a new DISCONNECT_REQUEST
+    /// Create a new `DISCONNECT_REQUEST`
     pub const fn new(channel_id: u8, control_endpoint: Hpai) -> Self {
         Self {
             channel_id,
@@ -266,7 +291,7 @@ impl DisconnectRequest {
     /// Build the complete frame
     pub fn build(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 16 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let mut offset = 0;
@@ -292,7 +317,7 @@ impl DisconnectRequest {
     }
 }
 
-/// DISCONNECT_RESPONSE service (0x020A)
+/// `DISCONNECT_RESPONSE` service (0x020A)
 #[derive(Debug, Clone, Copy)]
 pub struct DisconnectResponse {
     /// Communication channel ID
@@ -305,7 +330,7 @@ impl DisconnectResponse {
     /// Parse from frame body
     pub fn parse(data: &[u8]) -> Result<Self> {
         if data.len() < 2 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         Ok(Self {
@@ -341,7 +366,7 @@ impl ConnectionHeader {
     /// Encode to bytes
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 4 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         buf[0] = 4; // Structure length
@@ -355,7 +380,7 @@ impl ConnectionHeader {
     /// Decode from bytes
     pub fn decode(data: &[u8]) -> Result<Self> {
         if data.len() < 4 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         Ok(Self {
@@ -365,7 +390,7 @@ impl ConnectionHeader {
     }
 }
 
-/// TUNNELING_REQUEST service (0x0420)
+/// `TUNNELING_REQUEST` service (0x0420)
 #[derive(Debug)]
 pub struct TunnelingRequest<'a> {
     /// Connection header
@@ -375,7 +400,7 @@ pub struct TunnelingRequest<'a> {
 }
 
 impl<'a> TunnelingRequest<'a> {
-    /// Create a new TUNNELING_REQUEST
+    /// Create a new `TUNNELING_REQUEST`
     pub const fn new(connection_header: ConnectionHeader, cemi_data: &'a [u8]) -> Self {
         Self {
             connection_header,
@@ -387,7 +412,7 @@ impl<'a> TunnelingRequest<'a> {
     pub fn build(&self, buf: &mut [u8]) -> Result<usize> {
         let total_len = 6 + 4 + self.cemi_data.len();
         if buf.len() < total_len {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let mut offset = 0;
@@ -412,7 +437,7 @@ impl<'a> TunnelingRequest<'a> {
     /// Parse from frame body
     pub fn parse(data: &'a [u8]) -> Result<Self> {
         if data.len() < 4 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let connection_header = ConnectionHeader::decode(&data[0..4])?;
@@ -425,7 +450,7 @@ impl<'a> TunnelingRequest<'a> {
     }
 }
 
-/// TUNNELING_ACK service (0x0421)
+/// `TUNNELING_ACK` service (0x0421)
 #[derive(Debug, Clone, Copy)]
 pub struct TunnelingAck {
     /// Connection header
@@ -435,7 +460,7 @@ pub struct TunnelingAck {
 }
 
 impl TunnelingAck {
-    /// Create a new TUNNELING_ACK
+    /// Create a new `TUNNELING_ACK`
     pub const fn new(connection_header: ConnectionHeader, status: u8) -> Self {
         Self {
             connection_header,
@@ -446,7 +471,7 @@ impl TunnelingAck {
     /// Build the complete frame
     pub fn build(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 11 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let mut offset = 0;
@@ -471,7 +496,7 @@ impl TunnelingAck {
     /// Parse from frame body
     pub fn parse(data: &[u8]) -> Result<Self> {
         if data.len() < 5 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let connection_header = ConnectionHeader::decode(&data[0..4])?;

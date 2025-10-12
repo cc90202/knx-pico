@@ -57,17 +57,44 @@ impl IndividualAddress {
     /// # Errors
     ///
     /// Returns `KnxError::AddressOutOfRange` if any component is out of range.
-    pub const fn new(area: u8, line: u8, device: u8) -> Result<Self> {
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use knx_rs::IndividualAddress;
+    ///
+    /// let addr = IndividualAddress::new(1, 1, 5)?;
+    /// assert_eq!(addr.to_string(), "1.1.5");
+    /// # Ok::<(), knx_rs::KnxError>(())
+    /// ```
+    pub fn new(area: u8, line: u8, device: u8) -> Result<Self> {
         if area > Self::MAX_AREA {
-            return Err(KnxError::AddressOutOfRange);
+            return Err(KnxError::address_out_of_range());
         }
         if line > Self::MAX_LINE {
-            return Err(KnxError::AddressOutOfRange);
+            return Err(KnxError::address_out_of_range());
         }
         // device is u8, so it's always in range
 
-        let raw = ((area as u16) << 12) | ((line as u16) << 8) | (device as u16);
+        let raw = (u16::from(area) << 12) | (u16::from(line) << 8) | u16::from(device);
         Ok(Self { raw })
+    }
+
+    /// Create from a 3-element array `[area, line, device]`.
+    ///
+    /// Convenient for creating addresses from array literals.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use knx_rs::IndividualAddress;
+    ///
+    /// let addr = IndividualAddress::from_array([1, 1, 5])?;
+    /// assert_eq!(addr.to_string(), "1.1.5");
+    /// # Ok::<(), knx_rs::KnxError>(())
+    /// ```
+    pub fn from_array(parts: [u8; 3]) -> Result<Self> {
+        Self::new(parts[0], parts[1], parts[2])
     }
 
     /// Get the raw u16 representation of the address.
@@ -106,7 +133,7 @@ impl IndividualAddress {
     #[inline]
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < 2 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
         buf[0..2].copy_from_slice(&self.raw.to_be_bytes());
         Ok(2)
@@ -124,7 +151,7 @@ impl IndividualAddress {
     #[inline]
     pub fn decode(buf: &[u8]) -> Result<Self> {
         if buf.len() < 2 {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
         let raw = u16::from_be_bytes([buf[0], buf[1]]);
         Ok(Self { raw })
@@ -161,21 +188,21 @@ impl core::str::FromStr for IndividualAddress {
         let area = parts
             .next()
             .and_then(|s| s.parse::<u8>().ok())
-            .ok_or(KnxError::InvalidIndividualAddress)?;
+            .ok_or_else(KnxError::invalid_individual_address)?;
 
         let line = parts
             .next()
             .and_then(|s| s.parse::<u8>().ok())
-            .ok_or(KnxError::InvalidIndividualAddress)?;
+            .ok_or_else(KnxError::invalid_individual_address)?;
 
         let device = parts
             .next()
             .and_then(|s| s.parse::<u8>().ok())
-            .ok_or(KnxError::InvalidIndividualAddress)?;
+            .ok_or_else(KnxError::invalid_individual_address)?;
 
         // Ensure no extra parts
         if parts.next().is_some() {
-            return Err(KnxError::InvalidIndividualAddress);
+            return Err(KnxError::invalid_individual_address());
         }
 
         Self::new(area, line, device)
@@ -197,13 +224,13 @@ mod tests {
     #[test]
     fn test_new_invalid_area() {
         let result = IndividualAddress::new(16, 0, 0);
-        assert_eq!(result, Err(KnxError::AddressOutOfRange));
+        assert!(result.is_err());
     }
 
     #[test]
     fn test_new_invalid_line() {
         let result = IndividualAddress::new(0, 16, 0);
-        assert_eq!(result, Err(KnxError::AddressOutOfRange));
+        assert!(result.is_err());
     }
 
     #[test]

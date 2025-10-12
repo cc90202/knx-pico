@@ -1,17 +1,53 @@
 //! KNXnet/IP frame parsing and encoding.
 //!
-//! This module implements zero-copy parsing of KNXnet/IP frames.
+//! This module provides zero-copy, high-performance parsing and building of
+//! KNXnet/IP frames. It handles the transport layer frame structure including
+//! headers, service identification, and payload management.
 //!
-//! # Performance Optimizations
+//! ## Frame Structure
 //!
-//! This module is heavily optimized for speed:
+//! All KNXnet/IP frames follow this structure:
+//!
+//! ```text
+//! ┌─────────────────────────────┐
+//! │  Header (6 bytes)           │
+//! │  - Header Length: 0x06      │
+//! │  - Protocol Version: 0x10   │
+//! │  - Service Type: 2 bytes    │
+//! │  - Total Length: 2 bytes    │
+//! ├─────────────────────────────┤
+//! │  Body (variable)            │
+//! │  - Service-specific data    │
+//! └─────────────────────────────┘
+//! ```
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use knx_rs::protocol::frame::KnxnetIpFrame;
+//!
+//! // Parse an incoming frame (zero-copy)
+//! let frame = KnxnetIpFrame::parse(&buffer)?;
+//!
+//! match frame.service_type() {
+//!     ServiceType::TunnellingRequest => {
+//!         let body = frame.body();
+//!         // Process tunneling data...
+//!     }
+//!     _ => {}
+//! }
+//! ```
+//!
+//! ## Performance Optimizations
+//!
+//! This module is on the hot path for all KNX communication:
 //! - Zero-copy parsing with lifetimes
-//! - `#[inline(always)]` for hot path functions
+//! - `#[inline(always)]` for critical functions
 //! - Branch prediction hints for error paths
-//! - Unsafe optimizations where proven safe
+//! - Unsafe optimizations with safety proofs
 
 use crate::error::{KnxError, Result};
-use crate::protocol::constants::*;
+use crate::protocol::constants::{ServiceType, HEADER_SIZE_10, KNXNETIP_VERSION_10, MAX_FRAME_SIZE, IPV4_UDP};
 
 /// Compiler hint for unlikely branches (error paths)
 #[inline(always)]
@@ -25,7 +61,7 @@ const fn unlikely(b: bool) -> bool {
 
 /// Compiler hint for likely branches (success paths)
 #[inline(always)]
-#[allow(dead_code)] // Reserved for future optimizations
+#[expect(dead_code, reason = "Reserved for future optimizations")]
 const fn likely(b: bool) -> bool {
     !unlikely(!b)
 }
@@ -87,7 +123,7 @@ impl KnxnetIpHeader {
     pub fn parse(data: &[u8]) -> Result<Self> {
         // Fast bounds check with likelihood hint
         if unlikely(data.len() < Self::SIZE) {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         // SAFETY: We just checked the length above
@@ -106,15 +142,15 @@ impl KnxnetIpHeader {
         // Fast validation: combine checks with bitwise operations when possible
         // Most frames are valid, so mark error path as unlikely
         if unlikely(header_length != HEADER_SIZE_10) {
-            return Err(KnxError::InvalidFrame);
+            return Err(KnxError::invalid_frame());
         }
 
         if unlikely(protocol_version != KNXNETIP_VERSION_10) {
-            return Err(KnxError::UnsupportedVersion);
+            return Err(KnxError::unsupported_version());
         }
 
         let service_type =
-            ServiceType::from_u16(service_type_raw).ok_or(KnxError::UnsupportedServiceType)?;
+            ServiceType::from_u16(service_type_raw).ok_or_else(KnxError::unsupported_service_type)?;
 
         Ok(Self {
             header_length,
@@ -131,7 +167,7 @@ impl KnxnetIpHeader {
     /// Returns `KnxError::BufferTooSmall` if buffer is too small
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < Self::SIZE {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         buf[0] = self.header_length;
@@ -183,7 +219,7 @@ impl<'a> KnxnetIpFrame<'a> {
 
         // Validate total length with unlikely hint (error case)
         if unlikely(data.len() < header.total_length as usize) {
-            return Err(KnxError::InvalidFrame);
+            return Err(KnxError::invalid_frame());
         }
 
         Ok(Self { data, header })
@@ -230,6 +266,7 @@ impl<'a> KnxnetIpFrame<'a> {
 /// Builder for creating KNXnet/IP frames
 ///
 /// This builder helps construct valid KNXnet/IP frames with proper headers.
+#[derive(Debug)]
 pub struct FrameBuilder<'a> {
     service_type: ServiceType,
     body: &'a [u8],
@@ -252,11 +289,11 @@ impl<'a> FrameBuilder<'a> {
         let total_size = KnxnetIpHeader::SIZE + self.body.len();
 
         if total_size > MAX_FRAME_SIZE {
-            return Err(KnxError::PayloadTooLarge);
+            return Err(KnxError::payload_too_large());
         }
 
         if buf.len() < total_size {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         // Write header
@@ -317,14 +354,14 @@ impl Hpai {
     /// Parse HPAI from bytes
     pub fn parse(data: &[u8]) -> Result<Self> {
         if data.len() < Self::SIZE {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         let structure_length = data[0];
         let host_protocol = data[1];
 
         if structure_length != Self::SIZE as u8 {
-            return Err(KnxError::InvalidFrame);
+            return Err(KnxError::invalid_frame());
         }
 
         let ip_address = [data[2], data[3], data[4], data[5]];
@@ -341,7 +378,7 @@ impl Hpai {
     /// Encode HPAI into bytes
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize> {
         if buf.len() < Self::SIZE {
-            return Err(KnxError::BufferTooSmall);
+            return Err(KnxError::buffer_too_small());
         }
 
         buf[0] = self.structure_length;

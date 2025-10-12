@@ -1,5 +1,5 @@
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
-#![allow(dead_code)]
+#![expect(dead_code, reason = "Library under development, not all items used yet")]
 #![doc = include_str!("../README.md")]
 
 //! # knx-rs
@@ -30,6 +30,7 @@
 pub mod addressing;
 pub mod dpt;
 pub mod error;
+pub mod net;
 pub mod protocol;
 
 // Macro module (must be declared before use)
@@ -37,6 +38,11 @@ pub mod protocol;
 pub mod macros;
 
 // Re-export commonly used types
+#[doc(inline)]
 pub use addressing::{GroupAddress, IndividualAddress};
+#[doc(inline)]
 pub use dpt::{Dpt1, Dpt5, Dpt9, DptDecode, DptEncode};
+#[doc(inline)]
 pub use error::{KnxError, Result};
+#[doc(inline)]
+pub use net::Ipv4Addr;

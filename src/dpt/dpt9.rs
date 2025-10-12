@@ -132,7 +132,7 @@ impl Dpt9 {
     /// * `value` - The floating point value to encode
     ///
     /// # Returns
-    /// A 2-byte array [high_byte, low_byte]
+    /// A 2-byte array [`high_byte`, `low_byte`]
     ///
     /// # Errors
     /// Returns `DptValueOutOfRange` if value is out of representable range
@@ -176,7 +176,7 @@ impl Dpt9 {
 
         // Check range
         if !(-1024.0..=1023.0).contains(&mantissa_f) {
-            return Err(KnxError::DptValueOutOfRange);
+            return Err(KnxError::dpt_value_out_of_range());
         }
 
         // Round to nearest integer (manual rounding for no_std)
@@ -193,7 +193,7 @@ impl Dpt9 {
         // Build the 16-bit value
         // Bit 14-11: exponent (4 bits)
         // Bit 10-0: mantissa (11 bits, two's complement)
-        let value_u16 = ((exponent as u16) << 11) | mantissa_u16;
+        let value_u16 = (u16::from(exponent) << 11) | mantissa_u16;
 
         Ok(value_u16.to_be_bytes())
     }
@@ -207,7 +207,7 @@ impl Dpt9 {
     /// The decoded floating point value
     pub fn decode_from_bytes(&self, bytes: &[u8]) -> Result<f32> {
         if bytes.len() < 2 {
-            return Err(KnxError::InvalidDptData);
+            return Err(KnxError::invalid_dpt_data());
         }
 
         let value_u16 = u16::from_be_bytes([bytes[0], bytes[1]]);
@@ -226,7 +226,7 @@ impl Dpt9 {
 
         // Calculate value = (0.01 * mantissa) * 2^exponent
         // The sign is already included in the mantissa (two's complement)
-        let value = (0.01 * mantissa as f32) * (1u32 << exponent) as f32;
+        let value = (0.01 * f32::from(mantissa)) * (1u32 << exponent) as f32;
 
         Ok(value)
     }
@@ -343,7 +343,7 @@ mod tests {
     fn test_decode_invalid_length() {
         let result = Dpt9::Temperature.decode_from_bytes(&[0x00]);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KnxError::InvalidDptData));
+        assert!(matches!(result.unwrap_err(), KnxError::Dpt(_)));
     }
 
     #[test]
