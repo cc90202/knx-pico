@@ -489,17 +489,28 @@ impl KnxClientBuilder {
     ///
     /// # Arguments
     ///
-    /// * `ip` - Gateway IP address as `[u8; 4]` (e.g., `[192, 168, 1, 10]`)
+    /// * `ip` - Gateway IP address (accepts array, tuple, or `Ipv4Addr`)
     /// * `port` - Gateway port (typically 3671)
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```no_run
+    /// use knx_rs::Ipv4Addr;
+    ///
+    /// // From array
     /// let builder = KnxClient::builder()
     ///     .gateway([192, 168, 1, 10], 3671);
+    ///
+    /// // From tuple
+    /// let builder = KnxClient::builder()
+    ///     .gateway((192, 168, 1, 10), 3671);
+    ///
+    /// // From Ipv4Addr
+    /// let builder = KnxClient::builder()
+    ///     .gateway(Ipv4Addr::new(192, 168, 1, 10), 3671);
     /// ```
-    pub fn gateway(mut self, ip: [u8; 4], port: u16) -> Self {
-        self.gateway_ip = ip;
+    pub fn gateway(mut self, ip: impl Into<crate::Ipv4Addr>, port: u16) -> Self {
+        self.gateway_ip = ip.into().octets();
         self.gateway_port = port;
         self
     }
