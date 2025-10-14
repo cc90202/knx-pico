@@ -15,7 +15,7 @@ KNXnet/IP protocol implementation for embedded systems using Rust.
 
 ✅ **Phase 1-4 Complete**
 - ✅ Phase 1: Core Protocol (Frame, CEMI, Services)
-- ✅ Phase 2: Datapoint Types (DPT 1, 5, 7, 9, 13)
+- ✅ Phase 2: Datapoint Types (DPT 1, 3, 5, 7, 9, 13)
 - ✅ Phase 3: Tunneling Client with Typestate Pattern
 - ✅ Phase 4: Embassy + RP2040 Integration (Pico 2 W)
 
@@ -103,6 +103,10 @@ KNX communication uses three nested layers, like Russian dolls 📦:
 DPT 1.001 (Switch):
   true → [0x01]
   false → [0x00]
+
+DPT 3.007 (Dimming):
+  Increase by 4 intervals → [0x0B]  // Control=1, Stepcode=3
+  Stop → [0x00]                     // Break
 
 DPT 5.001 (Percentage):
   75% → [0xBF]  // 75 * 255 / 100 = 191 = 0xBF
@@ -333,7 +337,7 @@ if let Some(cemi_data) = client.receive().await? {
 }
 ```
 
-See [`examples/pico_knx_async.rs`](examples/pico_knx_async.rs) for complete working example with WiFi setup.
+See [`examples/pico_knx_async.rs`](examples/pico_knx_async.rs) for complete working example with `WiFi` setup.
 
 ### Build for Pico 2 W
 
@@ -390,6 +394,7 @@ knx-rs/
 │   └── async_tunnel.rs  # Async wrapper for Embassy
 ├── dpt/                 # Layer 3: Datapoint types
 │   ├── dpt1.rs          # Boolean (Switch, Binary)
+│   ├── dpt3.rs          # 3-bit controlled (Dimming, Blinds)
 │   ├── dpt5.rs          # 8-bit unsigned (Percentage, Angle)
 │   ├── dpt7.rs          # 16-bit unsigned (Counter, Time)
 │   ├── dpt9.rs          # 16-bit float (Temperature, Humidity)

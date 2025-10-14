@@ -6,6 +6,7 @@
 //! ## Supported DPT Families
 //!
 //! - **DPT 1.xxx** - Boolean (1 bit): switches, buttons, binary sensors
+//! - **DPT 3.xxx** - 3-bit controlled: dimming, blind control
 //! - **DPT 5.xxx** - 8-bit unsigned: percentages, angles, counters
 //! - **DPT 7.xxx** - 16-bit unsigned: pulses, brightness, color temperature
 //! - **DPT 9.xxx** - 2-byte float: temperature, illuminance, pressure
@@ -14,13 +15,17 @@
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use knx_rs::dpt::{Dpt1, Dpt5, Dpt7, Dpt9, Dpt13, DptEncode, DptDecode};
+//! use knx_rs::dpt::{Dpt1, Dpt3, Dpt5, Dpt7, Dpt9, Dpt13, StepCode, DptEncode, DptDecode};
 //!
 //! // Boolean value - uses encode() returning &'static [u8]
 //! let data = Dpt1::Switch.encode(true)?;
 //! let value = Dpt1::Switch.decode(&data)?;
 //!
 //! // For multi-byte types, use specific methods:
+//!
+//! // 3-bit controlled (dimming/blind) - returns owned byte
+//! let byte = Dpt3::Dimming.encode_to_byte(true, StepCode::Intervals4)?;
+//! let cmd = Dpt3::Dimming.decode(&[byte])?;
 //!
 //! // Percentage (0-100%) - returns owned byte
 //! let byte = Dpt5::Percentage.encode_to_byte(75)?;
@@ -49,6 +54,7 @@
 use crate::error::Result;
 
 pub mod dpt1;
+pub mod dpt3;
 pub mod dpt5;
 pub mod dpt7;
 pub mod dpt9;
@@ -57,6 +63,8 @@ pub mod dpt13;
 // Re-export common types
 #[doc(inline)]
 pub use dpt1::Dpt1;
+#[doc(inline)]
+pub use dpt3::{Dpt3, StepCode, ControlCommand};
 #[doc(inline)]
 pub use dpt5::Dpt5;
 #[doc(inline)]
