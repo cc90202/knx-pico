@@ -280,12 +280,18 @@ impl Default for ControlField2 {
 pub enum Tpci {
     /// Unnumbered Data Packet (UDP)
     UnnumberedData,
-    /// Numbered Data Packet (NDP)
-    NumberedData { sequence: u8 },
+    /// Numbered Data Packet (NDP) with sequence number
+    NumberedData {
+        /// Sequence number (0-15)
+        sequence: u8
+    },
     /// Unnumbered Control Packet (UCP)
     UnnumberedControl,
-    /// Numbered Control Packet (NCP)
-    NumberedControl { sequence: u8 },
+    /// Numbered Control Packet (NCP) with sequence number
+    NumberedControl {
+        /// Sequence number (0-15)
+        sequence: u8
+    },
 }
 
 impl Tpci {

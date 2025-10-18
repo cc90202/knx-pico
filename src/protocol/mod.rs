@@ -13,11 +13,17 @@ pub mod tunnel;
 #[cfg(any(feature = "embassy-rp", feature = "embassy-rp-usb"))]
 pub mod async_tunnel;
 
+#[doc(inline)]
 pub use cemi::*;
+#[doc(inline)]
 pub use constants::*;
+#[doc(inline)]
 pub use frame::*;
+#[doc(inline)]
 pub use services::*;
+#[doc(inline)]
 pub use tunnel::*;
 
 #[cfg(any(feature = "embassy-rp", feature = "embassy-rp-usb"))]
+#[doc(inline)]
 pub use async_tunnel::*;

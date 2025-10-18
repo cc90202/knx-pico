@@ -1,8 +1,11 @@
 //! Configuration file for environment variables.
-//! Modify according to your environment.
+//! Copy from `configuration.rs.example` and modify according to your environment.
+//!
+//! **IMPORTANT:** This file contains sensitive information and should not be
+//! committed to version control. It is included in `.gitignore`.
 
 pub const CONFIG: &str = r#"
-WIFI_NETWORK=YOUR_WIFI_SSID
-WIFI_PASSWORD=YOUR_WIFI_PASSWORD
-KNX_GATEWAY_IP=192.168.1.10
+WIFI_NETWORK=YourWiFiSSID
+WIFI_PASSWORD=YourWiFiPassword
+KNX_GATEWAY_IP=192.168.1.XXX
 "#;

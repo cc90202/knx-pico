@@ -103,9 +103,11 @@ pub enum KnxError {
     Addressing(AddressingError),
     /// Datapoint Type errors (encoding, decoding, etc.)
     Dpt(DptError),
-    /// Generic operation errors
+    /// Operation attempted in invalid state
     InvalidState,
+    /// Operation not supported in current context
     UnsupportedOperation,
+    /// Operation timed out
     Timeout,
 }
 

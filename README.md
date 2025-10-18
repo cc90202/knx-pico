@@ -27,7 +27,7 @@ KNX communication uses three nested layers, like Russian dolls 📦:
 
 ### The Big Picture
 
-```
+```text
 ┌─────────────────────────────────────────────────┐
 │  FRAME (outer envelope - IP transport)          │
 │  ┌───────────────────────────────────────────┐  │
@@ -59,7 +59,7 @@ KNX communication uses three nested layers, like Russian dolls 📦:
 #### 1. FRAME (KNXnet/IP Frame) 🌐
 **Purpose:** Transport data over IP network (WiFi/Ethernet)
 
-```
+```text
 ┌──────────────────────────────────────┐
 │ Header Length: 6                     │
 │ Protocol Version: 1.0                │
@@ -78,7 +78,7 @@ KNX communication uses three nested layers, like Russian dolls 📦:
 #### 2. CEMI (Common EMI) 📨
 **Purpose:** Describes the actual KNX command
 
-```
+```text
 ┌──────────────────────────────────────┐
 │ Message Code: L_Data.req             │ ← "I want to send"
 │ Source: 1.1.250                      │ ← "From me (Pico)"
@@ -99,7 +99,7 @@ KNX communication uses three nested layers, like Russian dolls 📦:
 #### 3. DPT (Datapoint Type) 💡
 **Purpose:** Encodes the actual value (ON/OFF, temperature, percentage...)
 
-```rust
+```text
 DPT 1.001 (Switch):
   true → [0x01]
   false → [0x00]
@@ -189,14 +189,14 @@ println!("Light {} turned on!", cemi.destination());
 | Layer | Purpose | Example |
 |-------|---------|---------|
 | **DPT** | Encoded value | `true` → `[0x01]` |
-| **CEMI** | KNX command | "From 1.1.250 to 1/2/3: write [0x01]" |
+| **CEMI** | KNX command | "From 1.1.250 to 1/2/3: write \[0x01\]" |
 | **FRAME** | IP transport | "UDP to 192.168.1.10:3671" |
 
 **Data Flow:**
-```
+```text
 Value (21.5°C)
   → DPT encoding → [0x0C, 0x1A]
-  → CEMI → "Write to 2/1/5: [0x0C, 0x1A]"
+  → CEMI → "Write to 2/1/5: \[0x0C, 0x1A\]"
   → FRAME → "UDP packet with CEMI inside"
   → WiFi → KNX Gateway
   → KNX Bus → Thermostat
@@ -213,7 +213,7 @@ Value (21.5°C)
 ### What is Tunneling?
 **Tunneling** is one specific service offered by KNXnet/IP for communicating with the KNX bus. It creates a point-to-point "tunnel" between your client and the KNX gateway.
 
-```
+```text
 You (Pico 2W) ←──────────→ KNX Gateway ←──────→ KNX Bus
                WiFi/IP        Tunneling         Twisted Pair
               Connection
@@ -242,7 +242,7 @@ For embedded control (Pico 2 W → KNX), **Tunneling is the right choice**:
 ### Tunneling Protocol Flow
 
 **1. Connection Setup**
-```
+```text
 Client                           Gateway
   │                                 │
   ├─ CONNECT_REQUEST ──────────────→│
@@ -252,7 +252,7 @@ Client                           Gateway
 ```
 
 **2. Data Exchange**
-```
+```text
 Client                           Gateway                    KNX Bus
   │                                 │                          │
   ├─ TUNNELING_REQUEST ────────────→│                          │
@@ -268,7 +268,7 @@ Client                           Gateway                    KNX Bus
 ```
 
 **3. Keep-Alive**
-```
+```text
 Client                           Gateway
   │                                 │
   ├─ CONNECTIONSTATE_REQUEST ──────→│
@@ -279,7 +279,7 @@ Client                           Gateway
 ```
 
 **4. Disconnection**
-```
+```text
 Client                           Gateway
   │                                 │
   ├─ DISCONNECT_REQUEST ────────────→│
@@ -289,7 +289,7 @@ Client                           Gateway
 
 ### Where Do the Layers Fit?
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │ KNXnet/IP FRAME                             │ ← General protocol
 │ ┌─────────────────────────────────────────┐ │
@@ -381,7 +381,7 @@ cargo flash-rp2040-usb      # Release build
 
 ## Architecture
 
-```
+```text
 knx-rs/
 ├── addressing/          # KNX addressing system
 │   ├── individual.rs    # Individual addresses (area.line.device)

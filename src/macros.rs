@@ -87,8 +87,7 @@ macro_rules! ga {
 
 /// Registers multiple DPT type mappings in a single block.
 ///
-/// This macro simplifies the registration of multiple group addresses with their
-/// corresponding datapoint types, making configuration code more concise and readable.
+/// Simplifies batch registration of group addresses with their DPT types.
 ///
 /// # Syntax
 ///
@@ -201,7 +200,7 @@ macro_rules! register_dpts {
 ///
 /// # Returns
 ///
-/// Returns the same `Result` as [`KnxClient::write()`](crate::knx_client::KnxClient::write):
+/// Returns the same `Result` as `KnxClient::write()`:
 /// - `Ok(())` - Write successful
 /// - `Err(KnxClientError)` - Write failed
 ///
@@ -256,7 +255,7 @@ macro_rules! knx_write {
 ///
 /// # Returns
 ///
-/// Returns the same `Result` as [`KnxClient::read()`](crate::knx_client::KnxClient::read):
+/// Returns the same `Result` as `KnxClient::read()`:
 /// - `Ok(())` - Read request sent successfully
 /// - `Err(KnxClientError)` - Send failed
 ///
@@ -306,7 +305,7 @@ macro_rules! knx_read {
 ///
 /// # Returns
 ///
-/// Returns the same `Result` as [`KnxClient::respond()`](crate::knx_client::KnxClient::respond):
+/// Returns the same `Result` as `KnxClient::respond()`:
 /// - `Ok(())` - Response sent successfully
 /// - `Err(KnxClientError)` - Send failed
 ///

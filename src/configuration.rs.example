@@ -1,0 +1,8 @@
+//! Configuration file for environment variables.
+//! Copy this file to `configuration.rs` and modify according to your environment.
+
+pub const CONFIG: &str = r#"
+WIFI_NETWORK=YourWiFiSSID
+WIFI_PASSWORD=YourWiFiPassword
+KNX_GATEWAY_IP=192.168.1.XXX
+"#;

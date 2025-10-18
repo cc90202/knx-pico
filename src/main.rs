@@ -364,6 +364,21 @@ async fn main(spawner: Spawner) {
                                     frac
                                 );
                             }
+                            KnxValue::Control3Bit { .. } => {
+                                info!("🎛️  Control3Bit {}/{}/{}", main, middle, sub);
+                            }
+                            KnxValue::Time { .. } => {
+                                info!("🕐 Time {}/{}/{}", main, middle, sub);
+                            }
+                            KnxValue::Date { .. } => {
+                                info!("📅 Date {}/{}/{}", main, middle, sub);
+                            }
+                            KnxValue::StringAscii { .. } => {
+                                info!("📝 String {}/{}/{}", main, middle, sub);
+                            }
+                            KnxValue::DateTime { .. } => {
+                                info!("🕐📅 DateTime {}/{}/{}", main, middle, sub);
+                            }
                         }
                     }
                     KnxEvent::GroupRead { address } => {
@@ -405,6 +420,10 @@ async fn main(spawner: Spawner) {
                                     whole,
                                     frac
                                 );
+                            }
+                            KnxValue::Control3Bit { .. } | KnxValue::Time { .. } | KnxValue::Date { .. }
+                            | KnxValue::StringAscii { .. } | KnxValue::DateTime { .. } => {
+                                info!("📬 Response {}/{}/{}: (complex type)", main, middle, sub);
                             }
                         }
                     }

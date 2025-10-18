@@ -138,35 +138,92 @@ impl<'a> AsyncTunnelClient<'a> {
     /// client.connect().await?;
     /// ```
     pub async fn connect(&mut self) -> Result<()> {
-        // Create tunnel client
-        let tunnel = TunnelClient::new(self.gateway_addr, self.gateway_port);
+        // Bind socket first to get local port
+        self.socket.bind(0).map_err(|_| KnxError::socket_error())?;
+
+        // Get local IP address for Routing mode
+        // Some KNX gateways don't support NAT mode (0.0.0.0:0) and require the real IP
+        let ep = self.socket.endpoint();
+        let (local_ip, local_port) = if let Some(embassy_net::IpAddress::Ipv4(ipv4)) = ep.addr {
+            (ipv4.octets(), ep.port)
+        } else {
+            ([0, 0, 0, 0], 0) // Fallback to NAT mode
+        };
+
+        #[cfg(feature = "defmt")]
+        defmt::info!("Local endpoint: {}.{}.{}.{}:{}",
+            local_ip[0], local_ip[1], local_ip[2], local_ip[3], local_port);
+
+        // Create tunnel client with Routing mode (use real IP and port)
+        let tunnel = TunnelClient::new_with_local_endpoint(
+            self.gateway_addr,
+            self.gateway_port,
+            local_ip,
+            local_port,
+        );
 
         // Build CONNECT_REQUEST
-        let (tunnel, frame_data) = tunnel.connect()?;
+        let tunnel = tunnel.connect()?;
+        let frame_data = tunnel.frame_data();
 
-        // Bind to any local port
-        self.socket.bind(0).map_err(|_| KnxError::SocketError)?;
+        // Log the CONNECT_REQUEST details
+        #[cfg(feature = "defmt")]
+        {
+            defmt::debug!("CONNECT_REQUEST frame ({} bytes):", frame_data.len());
+            defmt::debug!("  Header: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                frame_data[0], frame_data[1], frame_data[2], frame_data[3], frame_data[4], frame_data[5]);
+            if frame_data.len() >= 26 {
+                defmt::debug!("  Control endpoint: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                    frame_data[6], frame_data[7], frame_data[8], frame_data[9],
+                    frame_data[10], frame_data[11], frame_data[12], frame_data[13]);
+                defmt::debug!("  Data endpoint: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                    frame_data[14], frame_data[15], frame_data[16], frame_data[17],
+                    frame_data[18], frame_data[19], frame_data[20], frame_data[21]);
+                defmt::debug!("  CRI: {:02x} {:02x} {:02x} {:02x}",
+                    frame_data[22], frame_data[23], frame_data[24], frame_data[25]);
+            }
+        }
 
         // Send CONNECT_REQUEST
         let gateway = self.gateway_endpoint();
+        #[cfg(feature = "defmt")]
+        defmt::info!("Sending CONNECT_REQUEST to {}:{}", self.gateway_addr, self.gateway_port);
 
         self.socket
             .send_to(frame_data, gateway)
             .await
-            .map_err(|_| KnxError::SocketError)?;
+            .map_err(|_| KnxError::socket_error())?;
+
+        #[cfg(feature = "defmt")]
+        defmt::info!("CONNECT_REQUEST sent, waiting for response (timeout: {}s)...", CONNECT_TIMEOUT.as_secs());
 
         // Wait for CONNECT_RESPONSE with timeout
         let (n, _remote) = with_timeout(CONNECT_TIMEOUT, self.socket.recv_from(&mut self.rx_buffer))
             .await
-            .map_err(|_| KnxError::Timeout)?
-            .map_err(|_| KnxError::SocketError)?;
+            .map_err(|_| {
+                #[cfg(feature = "defmt")]
+                defmt::warn!("Timeout waiting for CONNECT_RESPONSE after {}s", CONNECT_TIMEOUT.as_secs());
+                KnxError::Timeout
+            })?
+            .map_err(|_| KnxError::socket_error())?;
+
+        #[cfg(feature = "defmt")]
+        {
+            let remote_ip = [
+                _remote.addr.as_bytes()[0],
+                _remote.addr.as_bytes()[1],
+                _remote.addr.as_bytes()[2],
+                _remote.addr.as_bytes()[3],
+            ];
+            defmt::info!("Received {} bytes from {}:{}", n, remote_ip, _remote.port);
+        }
 
         // Parse frame
         let frame = KnxnetIpFrame::parse(&self.rx_buffer[..n])?;
 
         // Verify service type
         if frame.service_type() != ServiceType::ConnectResponse {
-            return Err(KnxError::InvalidFrame);
+            return Err(KnxError::invalid_frame());
         }
 
         // Handle CONNECT_RESPONSE
@@ -194,7 +251,7 @@ impl<'a> AsyncTunnelClient<'a> {
         // Get gateway endpoint before borrowing client
         let gateway = self.gateway_endpoint();
 
-        let client = self.client.as_mut().ok_or(KnxError::NotConnected)?;
+        let client = self.client.as_mut().ok_or_else(|| KnxError::not_connected())?;
 
         // Build TUNNELING_REQUEST
         let frame_data = client.send_tunneling_request(cemi_data)?;
@@ -203,13 +260,13 @@ impl<'a> AsyncTunnelClient<'a> {
         self.socket
             .send_to(frame_data, gateway)
             .await
-            .map_err(|_| KnxError::SocketError)?;
+            .map_err(|_| KnxError::socket_error())?;
 
         // Wait for ACK
         let (n, _) = with_timeout(RESPONSE_TIMEOUT, self.socket.recv_from(&mut self.rx_buffer))
             .await
             .map_err(|_| KnxError::Timeout)?
-            .map_err(|_| KnxError::SocketError)?;
+            .map_err(|_| KnxError::socket_error())?;
 
         let frame = KnxnetIpFrame::parse(&self.rx_buffer[..n])?;
 
@@ -237,7 +294,7 @@ impl<'a> AsyncTunnelClient<'a> {
         // Get gateway endpoint before borrowing client
         let gateway = self.gateway_endpoint();
 
-        let client = self.client.as_mut().ok_or(KnxError::NotConnected)?;
+        let client = self.client.as_mut().ok_or_else(|| KnxError::not_connected())?;
 
         // Try to receive with timeout
         let result = with_timeout(
@@ -262,7 +319,7 @@ impl<'a> AsyncTunnelClient<'a> {
                         self.socket
                             .send_to(ack_frame, gateway)
                             .await
-                            .map_err(|_| KnxError::SocketError)?;
+                            .map_err(|_| KnxError::socket_error())?;
 
                         // Copy cEMI data to our buffer to avoid lifetime issues
                         let len = cemi_data.len();
@@ -289,7 +346,8 @@ impl<'a> AsyncTunnelClient<'a> {
     pub async fn disconnect(&mut self) -> Result<()> {
         if let Some(client) = self.client.take() {
             // Build DISCONNECT_REQUEST
-            let (_, frame_data) = client.disconnect()?;
+            let disconnecting_client = client.disconnect()?;
+            let frame_data = disconnecting_client.frame_data();
 
             // Send via UDP
             let gateway = self.gateway_endpoint();
@@ -297,7 +355,7 @@ impl<'a> AsyncTunnelClient<'a> {
             self.socket
                 .send_to(frame_data, gateway)
                 .await
-                .map_err(|_| KnxError::SocketError)?;
+                .map_err(|_| KnxError::socket_error())?;
 
             // Wait for DISCONNECT_RESPONSE (best effort)
             let _ = with_timeout(
@@ -342,7 +400,7 @@ impl<'a> AsyncTunnelClient<'a> {
     pub async fn send_heartbeat(&mut self) -> Result<()> {
         let gateway = self.gateway_endpoint();
 
-        let client = self.client.as_mut().ok_or(KnxError::NotConnected)?;
+        let client = self.client.as_mut().ok_or_else(|| KnxError::not_connected())?;
 
         // Build CONNECTIONSTATE_REQUEST
         let heartbeat_frame = client.send_heartbeat()?;
@@ -351,19 +409,19 @@ impl<'a> AsyncTunnelClient<'a> {
         self.socket
             .send_to(heartbeat_frame, gateway)
             .await
-            .map_err(|_| KnxError::SocketError)?;
+            .map_err(|_| KnxError::socket_error())?;
 
         // Wait for CONNECTIONSTATE_RESPONSE
         let (n, _) = with_timeout(RESPONSE_TIMEOUT, self.socket.recv_from(&mut self.rx_buffer))
             .await
             .map_err(|_| KnxError::Timeout)?
-            .map_err(|_| KnxError::SocketError)?;
+            .map_err(|_| KnxError::socket_error())?;
 
         let frame = KnxnetIpFrame::parse(&self.rx_buffer[..n])?;
 
         if frame.service_type() == ServiceType::ConnectionstateResponse {
             // Handle response and check if connection is still alive
-            let connected_client = self.client.take().ok_or(KnxError::NotConnected)?;
+            let connected_client = self.client.take().ok_or_else(|| KnxError::not_connected())?;
             let connected_client = connected_client.handle_heartbeat_response(frame.body())?;
             self.client = Some(connected_client);
         }

@@ -7,5 +7,7 @@
 pub mod group;
 pub mod individual;
 
+#[doc(inline)]
 pub use group::GroupAddress;
+#[doc(inline)]
 pub use individual::IndividualAddress;

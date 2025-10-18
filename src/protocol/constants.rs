@@ -26,13 +26,21 @@ pub const SYSTEM_SETUP_MULTICAST: &str = "224.0.23.11";
 // =============================================================================
 
 // Service type constants (for convenience)
+/// Service type constant for CONNECT_REQUEST (0x0205)
 pub const SERVICE_CONNECT_REQUEST: u16 = 0x0205;
+/// Service type constant for CONNECT_RESPONSE (0x0206)
 pub const SERVICE_CONNECT_RESPONSE: u16 = 0x0206;
+/// Service type constant for CONNECTIONSTATE_REQUEST (0x0207)
 pub const SERVICE_CONNECTIONSTATE_REQUEST: u16 = 0x0207;
+/// Service type constant for CONNECTIONSTATE_RESPONSE (0x0208)
 pub const SERVICE_CONNECTIONSTATE_RESPONSE: u16 = 0x0208;
+/// Service type constant for DISCONNECT_REQUEST (0x0209)
 pub const SERVICE_DISCONNECT_REQUEST: u16 = 0x0209;
+/// Service type constant for DISCONNECT_RESPONSE (0x020A)
 pub const SERVICE_DISCONNECT_RESPONSE: u16 = 0x020A;
+/// Service type constant for TUNNELING_REQUEST (0x0420)
 pub const SERVICE_TUNNELING_REQUEST: u16 = 0x0420;
+/// Service type constant for TUNNELING_ACK (0x0421)
 pub const SERVICE_TUNNELING_ACK: u16 = 0x0421;
 
 /// KNXnet/IP Core Service Type Identifiers

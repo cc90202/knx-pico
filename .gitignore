@@ -1,3 +1,6 @@
 /target
 .idea
 *.xml
+
+# Configuration files with sensitive data
+src/configuration.rs
