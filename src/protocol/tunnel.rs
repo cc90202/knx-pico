@@ -117,7 +117,7 @@ pub struct TunnelClient<State> {
     /// Buffer for building frames
     tx_buffer: [u8; BUFFER_SIZE],
     /// Buffer for receiving frames
-    #[expect(dead_code, reason = "Reserved for future receive buffer optimization")]
+    #[allow(dead_code)] // Reserved for future receive buffer optimization
     rx_buffer: [u8; BUFFER_SIZE],
     /// Current state (type changes based on state!)
     state: State,

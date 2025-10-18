@@ -27,3 +27,7 @@ flash-rp2040 = "run --bin knx-rs --features embassy-rp --target thumbv8m.main-no
 build-rp2040-usb = "build --bin knx-rs --features embassy-rp-usb --target thumbv8m.main-none-eabihf"
 check-rp2040-usb = "check --bin knx-rs --features embassy-rp-usb --target thumbv8m.main-none-eabihf"
 flash-rp2040-usb = "run --bin knx-rs --features embassy-rp-usb --target thumbv8m.main-none-eabihf --release"
+
+# Example commands (for pico_knx_async example)
+build-example-usb = "build --release --example pico_knx_async --target thumbv8m.main-none-eabihf --features embassy-rp-usb"
+flash-example-usb = "run --release --example pico_knx_async --target thumbv8m.main-none-eabihf --features embassy-rp-usb"

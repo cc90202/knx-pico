@@ -138,7 +138,7 @@ impl core::str::FromStr for Ipv4Addr {
         let mut parts = s.split('.');
         let mut octets = [0u8; 4];
 
-        for (i, octet) in octets.iter_mut().enumerate() {
+        for (_i, octet) in octets.iter_mut().enumerate() {
             let part = parts
                 .next()
                 .ok_or_else(crate::error::KnxError::invalid_address)?;

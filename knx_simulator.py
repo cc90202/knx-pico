@@ -227,10 +227,15 @@ class KNXSimulator:
             while True:
                 data, client_addr = self.sock.recvfrom(1024)
 
+                # RAW debug: always print received data
+                print(f"\n[RAW] Received {len(data)} bytes from {client_addr}")
+                print(f"      Hex: {data.hex()}")
+
                 # Parse header
                 frame = self.parse_header(data)
                 if not frame:
                     self.log(f"Invalid frame from {client_addr}")
+                    print(f"      ERROR: Failed to parse header")
                     continue
 
                 # Handle request

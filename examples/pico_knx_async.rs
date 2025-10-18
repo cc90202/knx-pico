@@ -18,16 +18,19 @@
 #![no_std]
 #![no_main]
 
-use defmt::*;
+use defmt::unwrap;
 use embassy_executor::Spawner;
 use embassy_net::{Config, StackResources};
 use embassy_net::udp::PacketMetadata;
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Level, Output};
-use embassy_rp::peripherals::{DMA_CH0, PIO0};
+use embassy_rp::peripherals::{DMA_CH0, PIO0, USB};
 use embassy_rp::pio::{InterruptHandler, Pio};
+use embassy_rp::usb::{Driver, InterruptHandler as UsbInterruptHandler};
 use embassy_time::{Duration, Timer};
 use static_cell::StaticCell;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
 use {defmt_rtt as _, panic_persist as _};
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 
@@ -41,16 +44,17 @@ use knx_rs::addressing::IndividualAddress;
 // Configuration
 // ============================================================================
 
-const WIFI_SSID: &str = "YOUR_WIFI_SSID"; // <-- CHANGE THIS
-const WIFI_PASSWORD: &str = "YOUR_WIFI_PASSWORD"; // <-- CHANGE THIS
+const WIFI_SSID: &str = "YOUR_WIFI_SSID";
+const WIFI_PASSWORD: &str = "YOUR_WIFI_PASSWORD";
 
-// KNX Gateway configuration
-const KNX_GATEWAY_IP: [u8; 4] = [192, 168, 1, 10]; // <-- CHANGE THIS
+// KNX Gateway configuration (Mac IP address running the simulator)
+const KNX_GATEWAY_IP: [u8; 4] = [192, 168, 1, 23];
 const KNX_GATEWAY_PORT: u16 = 3671;
 
 // Example KNX group addresses (3-level: main/middle/sub)
 // 1/2/3 = 0x0A03, calculated as: (1 << 11) | (2 << 8) | 3
 const LIGHT_LIVING_ROOM_RAW: u16 = 0x0A03; // 1/2/3
+#[allow(dead_code)] // Reserved for additional examples
 const LIGHT_BEDROOM_RAW: u16 = 0x0A04;     // 1/2/4
 
 // Our virtual KNX device address (area.line.device = 1.1.1)
@@ -63,6 +67,10 @@ const DEVICE_ADDRESS_RAW: u16 = 0x1101; // 1.1.1
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
+});
+
+bind_interrupts!(struct UsbIrqs {
+    USBCTRL_IRQ => UsbInterruptHandler<USB>;
 });
 
 // ============================================================================
@@ -86,14 +94,54 @@ async fn wifi_task(
 }
 
 // ============================================================================
+// USB Logger Task
+// ============================================================================
+
+#[embassy_executor::task]
+async fn logger_task(driver: Driver<'static, USB>) {
+    embassy_usb_logger::run!(1024, log::LevelFilter::Info, driver);
+}
+
+// ============================================================================
+// LED Blink Task (heartbeat indicator)
+// ============================================================================
+
+/// Shared control wrapper for cyw43 Control
+#[derive(Clone, Copy)]
+struct SharedControl(&'static Mutex<CriticalSectionRawMutex, cyw43::Control<'static>>);
+
+#[embassy_executor::task]
+async fn blink_task(shared_control: SharedControl) -> ! {
+    loop {
+        shared_control.0.lock().await.gpio_set(0, true).await;
+        Timer::after(Duration::from_millis(100)).await;
+        shared_control.0.lock().await.gpio_set(0, false).await;
+        Timer::after(Duration::from_millis(900)).await;
+    }
+}
+
+
+// ============================================================================
 // Main Application
 // ============================================================================
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("Starting Pico 2 W KNX Example");
-
     let p = embassy_rp::init(Default::default());
+
+    // Start USB logger (must be first)
+    let driver = Driver::new(p.USB, UsbIrqs);
+    spawner.must_spawn(logger_task(driver));
+
+    // Check for panic messages
+    if let Some(panic_message) = panic_persist::get_panic_message_utf8() {
+        log::error!("{panic_message}");
+        loop {
+            Timer::after(Duration::from_secs(5)).await;
+        }
+    }
+
+    log::info!("Starting Pico 2 W KNX Example");
 
     // ========================================================================
     // WiFi Initialization
@@ -147,7 +195,7 @@ async fn main(spawner: Spawner) {
     // WiFi Connection
     // ========================================================================
 
-    info!("Connecting to WiFi: {}", WIFI_SSID);
+    log::info!("Connecting to WiFi: {}", WIFI_SSID);
 
     loop {
         match control
@@ -158,30 +206,37 @@ async fn main(spawner: Spawner) {
             .await
         {
             Ok(_) => {
-                info!("WiFi connected successfully!");
+                log::info!("WiFi connected successfully!");
                 break;
             }
             Err(e) => {
-                error!("WiFi connection failed: status={}, retrying in 5s...", e.status);
+                log::error!("WiFi connection failed: status={}, retrying in 5s...", e.status);
                 Timer::after(Duration::from_secs(5)).await;
             }
         }
     }
 
+    // Create shared control for LED blink task (after WiFi connection)
+    static CONTROL_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, cyw43::Control<'static>>> = StaticCell::new();
+    let shared_control = SharedControl(CONTROL_MUTEX.init(Mutex::new(control)));
+
+    // Start LED blink task
+    unwrap!(spawner.spawn(blink_task(shared_control)));
+
     // Wait for DHCP
-    info!("Waiting for IP address...");
+    log::info!("Waiting for IP address...");
     stack.wait_config_up().await;
 
     if let Some(config) = stack.config_v4() {
-        info!("IP Address: {:?}", config.address.address());
+        log::info!("IP Address: {:?}", config.address.address());
     }
 
     // ========================================================================
     // KNX Connection
     // ========================================================================
 
-    info!("Connecting to KNX gateway at {}:{}",
-          KNX_GATEWAY_IP[0], KNX_GATEWAY_PORT);
+    log::info!("Connecting to KNX gateway at {}.{}.{}.{}:{}",
+          KNX_GATEWAY_IP[0], KNX_GATEWAY_IP[1], KNX_GATEWAY_IP[2], KNX_GATEWAY_IP[3], KNX_GATEWAY_PORT);
 
     // Allocate buffers for AsyncTunnelClient
     static RX_META: StaticCell<[PacketMetadata; 4]> = StaticCell::new();
@@ -206,9 +261,9 @@ async fn main(spawner: Spawner) {
 
     // Connect to gateway
     match client.connect().await {
-        Ok(_) => info!("✓ Connected to KNX gateway"),
+        Ok(_) => log::info!("✓ Connected to KNX gateway"),
         Err(_e) => {
-            error!("Failed to connect to KNX gateway");
+            log::error!("Failed to connect to KNX gateway");
             return;
         }
     }
@@ -217,13 +272,13 @@ async fn main(spawner: Spawner) {
     // Example 1: Turn on living room light
     // ========================================================================
 
-    info!("Example 1: Turning ON living room light (1/2/3)");
+    log::info!("Example 1: Turning ON living room light (1/2/3)");
 
     let light_addr = GroupAddress::from(LIGHT_LIVING_ROOM_RAW);
     let cemi_on = build_group_write_bool(light_addr, true);
     match client.send_cemi(&cemi_on).await {
-        Ok(_) => info!("✓ Command sent successfully"),
-        Err(_e) => error!("Failed to send command"),
+        Ok(_) => log::info!("✓ Command sent successfully"),
+        Err(_e) => log::error!("Failed to send command"),
     }
 
     Timer::after(Duration::from_secs(2)).await;
@@ -232,12 +287,12 @@ async fn main(spawner: Spawner) {
     // Example 2: Turn off living room light
     // ========================================================================
 
-    info!("Example 2: Turning OFF living room light");
+    log::info!("Example 2: Turning OFF living room light");
 
     let cemi_off = build_group_write_bool(light_addr, false);
     match client.send_cemi(&cemi_off).await {
-        Ok(_) => info!("✓ Command sent successfully"),
-        Err(_e) => error!("Failed to send command"),
+        Ok(_) => log::info!("✓ Command sent successfully"),
+        Err(_e) => log::error!("Failed to send command"),
     }
 
     Timer::after(Duration::from_secs(2)).await;
@@ -246,7 +301,7 @@ async fn main(spawner: Spawner) {
     // Example 3: Listen for events from KNX bus
     // ========================================================================
 
-    info!("Example 3: Listening for KNX bus events (press Ctrl+C to stop)...");
+    log::info!("Example 3: Listening for KNX bus events (press Ctrl+C to stop)...");
 
     // NOTE: In a real application, you should call client.send_heartbeat()
     // every 60 seconds to keep the connection alive. The gateway will close
@@ -262,7 +317,7 @@ async fn main(spawner: Spawner) {
     loop {
         match client.receive().await {
             Ok(Some(cemi_data)) => {
-                info!("Received cEMI frame ({} bytes)", cemi_data.len());
+                log::info!("Received cEMI frame ({} bytes)", cemi_data.len());
 
                 // Parse the cEMI frame
                 if let Ok(cemi) = knx_rs::protocol::cemi::CEMIFrame::parse(cemi_data) {
@@ -270,7 +325,7 @@ async fn main(spawner: Spawner) {
                         if ldata.is_group_write() {
                             if let Some(dest) = ldata.destination_group() {
                                 let dest_raw: u16 = dest.into();
-                                info!("  GroupValue_Write to {:04X}: {} bytes",
+                                log::info!("  GroupValue_Write to {:04X}: {} bytes",
                                       dest_raw, ldata.data.len());
 
                                 // Example: decode boolean value (DPT 1)
@@ -278,14 +333,14 @@ async fn main(spawner: Spawner) {
                                     // Value encoded in APCI (6-bit)
                                     if let Apci::GroupValueWrite = ldata.apci {
                                         // For proper decoding, would need actual APCI byte
-                                        info!("    Boolean value (encoded in APCI)");
+                                        log::info!("    Boolean value (encoded in APCI)");
                                     }
                                 }
                             }
                         } else if ldata.is_group_read() {
                             if let Some(dest) = ldata.destination_group() {
                                 let dest_raw: u16 = dest.into();
-                                info!("  GroupValue_Read from {:04X}", dest_raw);
+                                log::info!("  GroupValue_Read from {:04X}", dest_raw);
                             }
                         }
                     }
@@ -295,7 +350,7 @@ async fn main(spawner: Spawner) {
                 // No data available (timeout)
             }
             Err(_e) => {
-                error!("Receive error");
+                log::error!("Receive error");
             }
         }
 

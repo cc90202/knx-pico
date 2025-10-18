@@ -16,11 +16,12 @@ publish = false
 name = "knx_rs"
 path = "src/lib.rs"
 
-[[bin]]
-name = "knx-rs"
-path = "src/main.rs"
-# Allow either embassy-rp or embassy-rp-usb feature
-required-features = []
+# Binary temporarily disabled - uses outdated knx_client module
+# [[bin]]
+# name = "knx-rs"
+# path = "src/main.rs"
+# # Allow either embassy-rp or embassy-rp-usb feature
+# required-features = []
 
 [dependencies]
 # Core library dependencies (no_std)
