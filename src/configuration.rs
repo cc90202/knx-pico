@@ -5,7 +5,7 @@
 //! committed to version control. It is included in `.gitignore`.
 
 pub const CONFIG: &str = r#"
-WIFI_NETWORK=YourWiFiSSID
-WIFI_PASSWORD=YourWiFiPassword
-KNX_GATEWAY_IP=192.168.1.XXX
+WIFI_NETWORK=Vodafone-A53164087
+WIFI_PASSWORD=dl6uud8f9wmv5tlt
+KNX_GATEWAY_IP=192.168.1.29
 "#;

@@ -49,7 +49,7 @@ pub type Result<T> = core::result::Result<T, KnxClientError>;
 /// Errors that can occur during KNX client operations.
 ///
 /// This enum provides detailed error information for all client operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum KnxClientError {
     /// Client is not connected to the gateway.
@@ -116,8 +116,10 @@ impl fmt::Display for KnxClientError {
 impl std::error::Error for KnxClientError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::ConnectionFailed(e) | Self::SendFailed(e)
-            | Self::ReceiveFailed(e) | Self::ProtocolError(e) => Some(e),
+            Self::ConnectionFailed(e)
+            | Self::SendFailed(e)
+            | Self::ReceiveFailed(e)
+            | Self::ProtocolError(e) => Some(e),
             _ => None,
         }
     }
@@ -126,15 +128,15 @@ impl std::error::Error for KnxClientError {
 impl From<KnxError> for KnxClientError {
     fn from(err: KnxError) -> Self {
         match err {
-            KnxError::ConnectionFailed
-            | KnxError::ConnectionRefused
-            | KnxError::ConnectionTimeout
-            | KnxError::ConnectionLost => Self::ConnectionFailed(err),
-            KnxError::SendFailed => Self::SendFailed(err),
-            KnxError::ReceiveFailed => Self::ReceiveFailed(err),
+            KnxError::Connection(_) => Self::ConnectionFailed(err),
+            KnxError::Transport(_) => Self::SendFailed(err),
             KnxError::Timeout => Self::Timeout,
-            KnxError::BufferTooSmall => Self::BufferError,
-            _ => Self::ProtocolError(err),
+            KnxError::Protocol(_) => Self::ProtocolError(err),
+            KnxError::Tunneling(_) => Self::ProtocolError(err),
+            KnxError::Addressing(_) => Self::InvalidAddress,
+            KnxError::Dpt(_) => Self::ProtocolError(err),
+            KnxError::InvalidState => Self::ProtocolError(err),
+            KnxError::UnsupportedOperation => Self::UnsupportedOperation,
         }
     }
 }
@@ -219,9 +221,20 @@ impl DptType {
             (DptType::U8, KnxValue::U8(v)) => KnxValue::U8(v),
             (DptType::U16, KnxValue::U16(v)) => KnxValue::U16(v),
             // DPT 10.001: Already decoded as Time variant
-            (DptType::Time, KnxValue::Time { day, hour, minute, second }) => {
-                KnxValue::Time { day, hour, minute, second }
-            }
+            (
+                DptType::Time,
+                KnxValue::Time {
+                    day,
+                    hour,
+                    minute,
+                    second,
+                },
+            ) => KnxValue::Time {
+                day,
+                hour,
+                minute,
+                second,
+            },
             // DPT 11.001: Already decoded as Date variant
             (DptType::Date, KnxValue::Date { day, month, year }) => {
                 KnxValue::Date { day, month, year }
@@ -509,8 +522,8 @@ impl KnxClientBuilder {
     /// let builder = KnxClient::builder()
     ///     .gateway(Ipv4Addr::new(192, 168, 1, 10), 3671);
     /// ```
-    pub fn gateway(mut self, ip: impl Into<crate::Ipv4Addr>, port: u16) -> Self {
-        self.gateway_ip = ip.into().octets();
+    pub fn gateway(mut self, ip: [u8; 4], port: u16) -> Self {
+        self.gateway_ip = ip;
         self.gateway_port = port;
         self
     }
@@ -856,7 +869,10 @@ impl<'a> KnxClient<'a> {
     /// ```
     pub async fn read(&mut self, address: GroupAddress) -> Result<()> {
         let cemi = build_group_read(address, self.device_address);
-        self.tunnel.send_cemi(&cemi).await.map_err(KnxClientError::from)
+        self.tunnel
+            .send_cemi(&cemi)
+            .await
+            .map_err(KnxClientError::from)
     }
 
     /// Responds with a value to a group address (GroupValue_Response).
@@ -904,7 +920,10 @@ impl<'a> KnxClient<'a> {
     /// - [`KnxClientError::NotConnected`] - Client not connected
     /// - [`KnxClientError::SendFailed`] - Failed to send frame
     pub async fn send_raw_cemi(&mut self, cemi: &[u8]) -> Result<()> {
-        self.tunnel.send_cemi(cemi).await.map_err(KnxClientError::from)
+        self.tunnel
+            .send_cemi(cemi)
+            .await
+            .map_err(KnxClientError::from)
     }
 
     /// Waits for and parses the next KNX bus event.
@@ -952,11 +971,12 @@ impl<'a> KnxClient<'a> {
                                 if apci == 0x80 {
                                     if let Some(value) = decode_value(ldata.data) {
                                         // Apply DPT type from registry if registered
-                                        let typed_value = if let Some(dpt_type) = self.lookup_dpt(dest) {
-                                            dpt_type.apply_to_value(value)
-                                        } else {
-                                            value
-                                        };
+                                        let typed_value =
+                                            if let Some(dpt_type) = self.lookup_dpt(dest) {
+                                                dpt_type.apply_to_value(value)
+                                            } else {
+                                                value
+                                            };
 
                                         return Ok(Some(KnxEvent::GroupWrite {
                                             address: dest,
@@ -971,11 +991,12 @@ impl<'a> KnxClient<'a> {
                                 } else if apci == 0x40 {
                                     if let Some(value) = decode_value(ldata.data) {
                                         // Apply DPT type from registry if registered
-                                        let typed_value = if let Some(dpt_type) = self.lookup_dpt(dest) {
-                                            dpt_type.apply_to_value(value)
-                                        } else {
-                                            value
-                                        };
+                                        let typed_value =
+                                            if let Some(dpt_type) = self.lookup_dpt(dest) {
+                                                dpt_type.apply_to_value(value)
+                                            } else {
+                                                value
+                                            };
 
                                         return Ok(Some(KnxEvent::GroupResponse {
                                             address: dest,
@@ -1201,13 +1222,18 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
             buffer[4] = (v & 0xFF) as u8;
             13
         }
-        KnxValue::Time { day, hour, minute, second } => {
+        KnxValue::Time {
+            day,
+            hour,
+            minute,
+            second,
+        } => {
             // DPT 10.001: 3 bytes encoding day, hour, minute, second
             // Byte 1: (day<<5) | hour
             // Byte 2: minute
             // Byte 3: second
-            let day = day.min(7);       // Clamp to 0-7
-            let hour = hour.min(23);     // Clamp to 0-23
+            let day = day.min(7); // Clamp to 0-7
+            let hour = hour.min(23); // Clamp to 0-23
             let minute = minute.min(59); // Clamp to 0-59
             let second = second.min(59); // Clamp to 0-59
 
@@ -1224,9 +1250,9 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
             // Byte 1: day (1-31)
             // Byte 2: month (1-12)
             // Byte 3: year (0-99)
-            let day = day.max(1).min(31);   // Clamp to 1-31
+            let day = day.max(1).min(31); // Clamp to 1-31
             let month = month.max(1).min(12); // Clamp to 1-12
-            let year = year.min(99);         // Clamp to 0-99
+            let year = year.min(99); // Clamp to 0-99
 
             buffer[0] = 0x04; // NPDU length (4 bytes including TPCI/APCI)
             buffer[1] = 0x00; // TPCI
@@ -1294,14 +1320,30 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
 
             // Flags byte 1 (byte 9)
             let mut flags1 = 0u8;
-            if fault { flags1 |= 0x80; }
-            if working_day { flags1 |= 0x40; }
-            if no_wd { flags1 |= 0x20; }
-            if no_year { flags1 |= 0x10; }
-            if no_date { flags1 |= 0x08; }
-            if no_dow { flags1 |= 0x04; }
-            if no_time { flags1 |= 0x02; }
-            if standard_summertime { flags1 |= 0x01; }
+            if fault {
+                flags1 |= 0x80;
+            }
+            if working_day {
+                flags1 |= 0x40;
+            }
+            if no_wd {
+                flags1 |= 0x20;
+            }
+            if no_year {
+                flags1 |= 0x10;
+            }
+            if no_date {
+                flags1 |= 0x08;
+            }
+            if no_dow {
+                flags1 |= 0x04;
+            }
+            if no_time {
+                flags1 |= 0x02;
+            }
+            if standard_summertime {
+                flags1 |= 0x01;
+            }
             buffer[9] = flags1;
 
             // Flags byte 2 (byte 10) - only bit 7 is used for quality
@@ -1310,8 +1352,11 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
 
             19 // Total frame length: 11 (cEMI header) + 8 (data)
         }
-        KnxValue::Temperature(t) | KnxValue::Lux(t) | KnxValue::Humidity(t)
-        | KnxValue::Ppm(t) | KnxValue::Float2(t) => {
+        KnxValue::Temperature(t)
+        | KnxValue::Lux(t)
+        | KnxValue::Humidity(t)
+        | KnxValue::Ppm(t)
+        | KnxValue::Float2(t) => {
             let encoded = encode_dpt9(t);
             buffer[0] = 0x03;
             buffer[1] = 0x00;
@@ -1633,7 +1678,10 @@ mod tests {
     #[test]
     fn test_dpt3_encode_decrease_break() {
         // DPT 3.xxx: decrease/up, break (step = 0)
-        let value = KnxValue::Control3Bit { control: false, step: 0 };
+        let value = KnxValue::Control3Bit {
+            control: false,
+            step: 0,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -1647,7 +1695,10 @@ mod tests {
     #[test]
     fn test_dpt3_encode_increase_step_5() {
         // DPT 3.xxx: increase/down, step = 5
-        let value = KnxValue::Control3Bit { control: true, step: 5 };
+        let value = KnxValue::Control3Bit {
+            control: true,
+            step: 5,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -1661,7 +1712,10 @@ mod tests {
     #[test]
     fn test_dpt3_encode_step_clamping() {
         // Test that step > 7 gets clamped to 7
-        let value = KnxValue::Control3Bit { control: false, step: 15 };
+        let value = KnxValue::Control3Bit {
+            control: false,
+            step: 15,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -1676,18 +1730,36 @@ mod tests {
 
         // Apply Dimming DPT type
         let dimming_value = DptType::Dimming.apply_to_value(raw_u8);
-        assert_eq!(dimming_value, KnxValue::Control3Bit { control: true, step: 5 });
+        assert_eq!(
+            dimming_value,
+            KnxValue::Control3Bit {
+                control: true,
+                step: 5
+            }
+        );
 
         // Apply Blinds DPT type
         let blinds_value = DptType::Blinds.apply_to_value(raw_u8);
-        assert_eq!(blinds_value, KnxValue::Control3Bit { control: true, step: 5 });
+        assert_eq!(
+            blinds_value,
+            KnxValue::Control3Bit {
+                control: true,
+                step: 5
+            }
+        );
     }
 
     #[test]
     fn test_dpt3_decode_decrease_break() {
         let raw_u8 = KnxValue::U8(0x00); // control=0, step=0
         let value = DptType::Dimming.apply_to_value(raw_u8);
-        assert_eq!(value, KnxValue::Control3Bit { control: false, step: 0 });
+        assert_eq!(
+            value,
+            KnxValue::Control3Bit {
+                control: false,
+                step: 0
+            }
+        );
     }
 
     #[test]
@@ -1695,11 +1767,7 @@ mod tests {
         // Test all valid step values (0-7)
         for step in 0..=7 {
             for control in [false, true] {
-                let expected_byte = if control {
-                    0x08 | step
-                } else {
-                    step
-                };
+                let expected_byte = if control { 0x08 | step } else { step };
 
                 let raw_u8 = KnxValue::U8(expected_byte);
                 let decoded = DptType::Dimming.apply_to_value(raw_u8);
@@ -1711,7 +1779,10 @@ mod tests {
     #[test]
     fn test_dpt3_roundtrip() {
         // Test encode -> decode roundtrip
-        let original = KnxValue::Control3Bit { control: true, step: 3 };
+        let original = KnxValue::Control3Bit {
+            control: true,
+            step: 3,
+        };
 
         // Encode
         let mut buffer = [0u8; 16];
@@ -1734,7 +1805,10 @@ mod tests {
     #[test]
     fn test_dpt3_already_decoded_passthrough() {
         // Test that already-decoded Control3Bit values pass through unchanged
-        let value = KnxValue::Control3Bit { control: false, step: 7 };
+        let value = KnxValue::Control3Bit {
+            control: false,
+            step: 7,
+        };
 
         let dimming_value = DptType::Dimming.apply_to_value(value);
         assert_eq!(dimming_value, value);
@@ -1748,7 +1822,12 @@ mod tests {
     #[test]
     fn test_dpt10_encode_time() {
         // DPT 10.001: Monday, 14:30:45
-        let value = KnxValue::Time { day: 1, hour: 14, minute: 30, second: 45 };
+        let value = KnxValue::Time {
+            day: 1,
+            hour: 14,
+            minute: 30,
+            second: 45,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -1764,7 +1843,12 @@ mod tests {
     #[test]
     fn test_dpt10_encode_no_day() {
         // DPT 10.001: No day, 00:00:00
-        let value = KnxValue::Time { day: 0, hour: 0, minute: 0, second: 0 };
+        let value = KnxValue::Time {
+            day: 0,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -1777,7 +1861,12 @@ mod tests {
     #[test]
     fn test_dpt10_encode_sunday_midnight() {
         // DPT 10.001: Sunday (7), 23:59:59
-        let value = KnxValue::Time { day: 7, hour: 23, minute: 59, second: 59 };
+        let value = KnxValue::Time {
+            day: 7,
+            hour: 23,
+            minute: 59,
+            second: 59,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -1790,7 +1879,12 @@ mod tests {
     #[test]
     fn test_dpt10_encode_clamping() {
         // Test that values > max get clamped
-        let value = KnxValue::Time { day: 10, hour: 25, minute: 70, second: 80 };
+        let value = KnxValue::Time {
+            day: 10,
+            hour: 25,
+            minute: 70,
+            second: 80,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -1809,14 +1903,24 @@ mod tests {
         let decoded = decode_value(&data);
         assert_eq!(
             decoded,
-            Some(KnxValue::Time { day: 3, hour: 15, minute: 45, second: 30 })
+            Some(KnxValue::Time {
+                day: 3,
+                hour: 15,
+                minute: 45,
+                second: 30
+            })
         );
     }
 
     #[test]
     fn test_dpt10_roundtrip() {
         // Test encode -> decode roundtrip
-        let original = KnxValue::Time { day: 5, hour: 12, minute: 30, second: 15 };
+        let original = KnxValue::Time {
+            day: 5,
+            hour: 12,
+            minute: 30,
+            second: 15,
+        };
 
         // Encode
         let mut buffer = [0u8; 16];
@@ -1837,7 +1941,12 @@ mod tests {
     #[test]
     fn test_dpt10_apply_to_value() {
         // Test that Time values pass through unchanged
-        let value = KnxValue::Time { day: 2, hour: 10, minute: 30, second: 0 };
+        let value = KnxValue::Time {
+            day: 2,
+            hour: 10,
+            minute: 30,
+            second: 0,
+        };
         let applied = DptType::Time.apply_to_value(value);
         assert_eq!(applied, value);
     }
@@ -1846,7 +1955,12 @@ mod tests {
     fn test_dpt10_all_days() {
         // Test all valid day values (0-7)
         for day in 0..=7 {
-            let value = KnxValue::Time { day, hour: 12, minute: 0, second: 0 };
+            let value = KnxValue::Time {
+                day,
+                hour: 12,
+                minute: 0,
+                second: 0,
+            };
             let mut buffer = [0u8; 16];
             encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -1962,14 +2076,8 @@ mod tests {
 
         match (&original, decoded) {
             (
-                KnxValue::StringAscii {
-                    data: d1,
-                    len: l1,
-                },
-                Some(KnxValue::StringAscii {
-                    data: d2,
-                    len: l2,
-                }),
+                KnxValue::StringAscii { data: d1, len: l1 },
+                Some(KnxValue::StringAscii { data: d2, len: l2 }),
             ) => {
                 assert_eq!(l1, &l2);
                 assert_eq!(&d1[..], &d2[..]);
@@ -1994,14 +2102,8 @@ mod tests {
 
         match (&value, applied) {
             (
-                KnxValue::StringAscii {
-                    data: d1,
-                    len: l1,
-                },
-                KnxValue::StringAscii {
-                    data: d2,
-                    len: l2,
-                },
+                KnxValue::StringAscii { data: d1, len: l1 },
+                KnxValue::StringAscii { data: d2, len: l2 },
             ) => {
                 assert_eq!(l1, &l2);
                 assert_eq!(&d1[..], &d2[..]);
@@ -2041,7 +2143,11 @@ mod tests {
     #[test]
     fn test_dpt11_encode_date() {
         // DPT 11.001: 2023-12-25 (25/12/23)
-        let value = KnxValue::Date { day: 25, month: 12, year: 23 };
+        let value = KnxValue::Date {
+            day: 25,
+            month: 12,
+            year: 23,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -2057,7 +2163,11 @@ mod tests {
     #[test]
     fn test_dpt11_encode_first_day() {
         // DPT 11.001: 2000-01-01 (01/01/00)
-        let value = KnxValue::Date { day: 1, month: 1, year: 0 };
+        let value = KnxValue::Date {
+            day: 1,
+            month: 1,
+            year: 0,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -2070,7 +2180,11 @@ mod tests {
     #[test]
     fn test_dpt11_encode_last_day() {
         // DPT 11.001: 2099-12-31 (31/12/99)
-        let value = KnxValue::Date { day: 31, month: 12, year: 99 };
+        let value = KnxValue::Date {
+            day: 31,
+            month: 12,
+            year: 99,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -2083,7 +2197,11 @@ mod tests {
     #[test]
     fn test_dpt11_encode_clamping() {
         // Test that values out of range get clamped
-        let value = KnxValue::Date { day: 0, month: 0, year: 150 };
+        let value = KnxValue::Date {
+            day: 0,
+            month: 0,
+            year: 150,
+        };
         let mut buffer = [0u8; 16];
         let len = encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -2102,14 +2220,22 @@ mod tests {
         let decoded = decode_value(&data);
         assert_eq!(
             decoded,
-            Some(KnxValue::Date { day: 15, month: 6, year: 23 })
+            Some(KnxValue::Date {
+                day: 15,
+                month: 6,
+                year: 23
+            })
         );
     }
 
     #[test]
     fn test_dpt11_roundtrip() {
         // Test encode -> decode roundtrip
-        let original = KnxValue::Date { day: 10, month: 3, year: 24 };
+        let original = KnxValue::Date {
+            day: 10,
+            month: 3,
+            year: 24,
+        };
 
         // Encode
         let mut buffer = [0u8; 16];
@@ -2130,7 +2256,11 @@ mod tests {
     #[test]
     fn test_dpt11_apply_to_value() {
         // Test that Date values pass through unchanged
-        let value = KnxValue::Date { day: 15, month: 8, year: 23 };
+        let value = KnxValue::Date {
+            day: 15,
+            month: 8,
+            year: 23,
+        };
         let applied = DptType::Date.apply_to_value(value);
         assert_eq!(applied, value);
     }
@@ -2139,7 +2269,11 @@ mod tests {
     fn test_dpt11_all_months() {
         // Test all valid month values (1-12)
         for month in 1..=12 {
-            let value = KnxValue::Date { day: 15, month, year: 23 };
+            let value = KnxValue::Date {
+                day: 15,
+                month,
+                year: 23,
+            };
             let mut buffer = [0u8; 16];
             encode_value_with_apci(value, &mut buffer, 0x80);
 
@@ -2159,7 +2293,11 @@ mod tests {
         let decoded = decode_value(&data);
 
         match decoded {
-            Some(KnxValue::Date { day: 15, month: 3, year: 23 }) => {}, // Expected
+            Some(KnxValue::Date {
+                day: 15,
+                month: 3,
+                year: 23,
+            }) => {} // Expected
             _ => panic!("Expected Date, got {:?}", decoded),
         }
     }
@@ -2172,7 +2310,12 @@ mod tests {
         let decoded = decode_value(&data);
 
         match decoded {
-            Some(KnxValue::Time { day: 5, hour: 18, minute: 30, second: 45 }) => {}, // Expected
+            Some(KnxValue::Time {
+                day: 5,
+                hour: 18,
+                minute: 30,
+                second: 45,
+            }) => {} // Expected
             _ => panic!("Expected Time, got {:?}", decoded),
         }
     }
@@ -2399,9 +2542,18 @@ mod tests {
 
     #[test]
     fn test_control3bit_equality() {
-        let a = KnxValue::Control3Bit { control: true, step: 5 };
-        let b = KnxValue::Control3Bit { control: true, step: 5 };
-        let c = KnxValue::Control3Bit { control: false, step: 5 };
+        let a = KnxValue::Control3Bit {
+            control: true,
+            step: 5,
+        };
+        let b = KnxValue::Control3Bit {
+            control: true,
+            step: 5,
+        };
+        let c = KnxValue::Control3Bit {
+            control: false,
+            step: 5,
+        };
 
         assert_eq!(a, b);
         assert_ne!(a, c);
@@ -2409,7 +2561,10 @@ mod tests {
 
     #[test]
     fn test_control3bit_debug_format() {
-        let value = KnxValue::Control3Bit { control: true, step: 3 };
+        let value = KnxValue::Control3Bit {
+            control: true,
+            step: 3,
+        };
         let debug_str = format!("{:?}", value);
         assert!(debug_str.contains("Control3Bit"));
         assert!(debug_str.contains("control"));
@@ -2418,9 +2573,24 @@ mod tests {
 
     #[test]
     fn test_time_equality() {
-        let a = KnxValue::Time { day: 1, hour: 12, minute: 30, second: 45 };
-        let b = KnxValue::Time { day: 1, hour: 12, minute: 30, second: 45 };
-        let c = KnxValue::Time { day: 2, hour: 12, minute: 30, second: 45 };
+        let a = KnxValue::Time {
+            day: 1,
+            hour: 12,
+            minute: 30,
+            second: 45,
+        };
+        let b = KnxValue::Time {
+            day: 1,
+            hour: 12,
+            minute: 30,
+            second: 45,
+        };
+        let c = KnxValue::Time {
+            day: 2,
+            hour: 12,
+            minute: 30,
+            second: 45,
+        };
 
         assert_eq!(a, b);
         assert_ne!(a, c);
@@ -2428,7 +2598,12 @@ mod tests {
 
     #[test]
     fn test_time_debug_format() {
-        let value = KnxValue::Time { day: 3, hour: 15, minute: 45, second: 30 };
+        let value = KnxValue::Time {
+            day: 3,
+            hour: 15,
+            minute: 45,
+            second: 30,
+        };
         let debug_str = format!("{:?}", value);
         assert!(debug_str.contains("Time"));
         assert!(debug_str.contains("day"));
@@ -2439,9 +2614,21 @@ mod tests {
 
     #[test]
     fn test_date_equality() {
-        let a = KnxValue::Date { day: 15, month: 6, year: 23 };
-        let b = KnxValue::Date { day: 15, month: 6, year: 23 };
-        let c = KnxValue::Date { day: 16, month: 6, year: 23 };
+        let a = KnxValue::Date {
+            day: 15,
+            month: 6,
+            year: 23,
+        };
+        let b = KnxValue::Date {
+            day: 15,
+            month: 6,
+            year: 23,
+        };
+        let c = KnxValue::Date {
+            day: 16,
+            month: 6,
+            year: 23,
+        };
 
         assert_eq!(a, b);
         assert_ne!(a, c);
@@ -2449,7 +2636,11 @@ mod tests {
 
     #[test]
     fn test_date_debug_format() {
-        let value = KnxValue::Date { day: 25, month: 12, year: 23 };
+        let value = KnxValue::Date {
+            day: 25,
+            month: 12,
+            year: 23,
+        };
         let debug_str = format!("{:?}", value);
         assert!(debug_str.contains("Date"));
         assert!(debug_str.contains("day"));
