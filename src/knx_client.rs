@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use knx_pico::addressing::GroupAddress;
+//! use crate::addressing::GroupAddress;
 //! use knx_client::{KnxClient, KnxValue};
 //!
 //! // Create client with builder pattern
@@ -23,11 +23,11 @@
 use core::fmt;
 use embassy_net::udp::PacketMetadata;
 use heapless::index_map::FnvIndexMap;
-use knx_pico::addressing::{GroupAddress, IndividualAddress};
-use knx_pico::error::KnxError;
-use knx_pico::protocol::async_tunnel::AsyncTunnelClient;
-use knx_pico::protocol::cemi::{ControlField1, ControlField2};
-use knx_pico::protocol::constants::CEMIMessageCode;
+use crate::addressing::{GroupAddress, IndividualAddress};
+use crate::error::KnxError;
+use crate::protocol::async_tunnel::AsyncTunnelClient;
+use crate::protocol::cemi::{ControlField1, ControlField2};
+use crate::protocol::constants::CEMIMessageCode;
 
 /// Default device individual address (1.1.1).
 const DEVICE_ADDRESS_RAW: u16 = 0x1101;
@@ -510,7 +510,7 @@ impl KnxClientBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use knx_pico::Ipv4Addr;
+    /// use crate::Ipv4Addr;
     ///
     /// // From array
     /// let builder = KnxClient::builder()
@@ -965,7 +965,7 @@ impl<'a> KnxClient<'a> {
     pub async fn receive_event(&mut self) -> Result<Option<KnxEvent>> {
         match self.tunnel.receive().await {
             Ok(Some(cemi_data)) => {
-                if let Ok(cemi) = knx_pico::protocol::cemi::CEMIFrame::parse(cemi_data) {
+                if let Ok(cemi) = crate::protocol::cemi::CEMIFrame::parse(cemi_data) {
                     if let Ok(ldata) = cemi.as_ldata() {
                         if let Some(dest) = ldata.destination_group() {
                             if !ldata.data.is_empty() {
