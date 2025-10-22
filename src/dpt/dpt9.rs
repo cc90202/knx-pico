@@ -34,7 +34,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::dpt::Dpt9;
+//! use knx_pico::dpt::Dpt9;
 //!
 //! // Encode temperature
 //! let bytes = Dpt9::Temperature.encode_to_bytes(21.5)?;

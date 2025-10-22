@@ -14,7 +14,7 @@ use core::fmt;
 /// # Examples
 ///
 /// ```
-/// use knx_rs::net::Ipv4Addr;
+/// use knx_pico::net::Ipv4Addr;
 ///
 /// // From array
 /// let addr = Ipv4Addr::from([192, 168, 1, 10]);
@@ -39,7 +39,7 @@ impl Ipv4Addr {
     /// # Examples
     ///
     /// ```
-    /// use knx_rs::net::Ipv4Addr;
+    /// use knx_pico::net::Ipv4Addr;
     ///
     /// let addr = Ipv4Addr::new(192, 168, 1, 10);
     /// assert_eq!(addr.octets(), [192, 168, 1, 10]);
@@ -56,7 +56,7 @@ impl Ipv4Addr {
     /// # Examples
     ///
     /// ```
-    /// use knx_rs::net::Ipv4Addr;
+    /// use knx_pico::net::Ipv4Addr;
     ///
     /// let addr = Ipv4Addr::new(192, 168, 1, 10);
     /// assert_eq!(addr.octets(), [192, 168, 1, 10]);
@@ -73,7 +73,7 @@ impl Ipv4Addr {
     /// # Examples
     ///
     /// ```
-    /// use knx_rs::net::Ipv4Addr;
+    /// use knx_pico::net::Ipv4Addr;
     ///
     /// let addr = Ipv4Addr::UNSPECIFIED;
     /// assert_eq!(addr.octets(), [0, 0, 0, 0]);

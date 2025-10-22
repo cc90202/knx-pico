@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Automated test runner for knx-rs
+Automated test runner for knx-pico
 
 This script:
 1. Starts the KNX simulator in background
@@ -234,7 +234,7 @@ class TestRunner:
             self.log(f"\n❌ Some tests failed ({passed}/{total} passed)", Colors.RED + Colors.BOLD)
 
 def main():
-    parser = argparse.ArgumentParser(description="Run knx-rs tests with simulator")
+    parser = argparse.ArgumentParser(description="Run knx-pico tests with simulator")
     parser.add_argument("--unit-only", action="store_true", help="Run only unit tests")
     parser.add_argument("--integration-only", action="store_true", help="Run only integration tests")
     parser.add_argument("--examples-only", action="store_true", help="Check only examples")

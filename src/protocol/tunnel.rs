@@ -17,7 +17,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::protocol::tunnel::TunnelClient;
+//! use knx_pico::protocol::tunnel::TunnelClient;
 //!
 //! // Create client (starts in Idle state)
 //! let client = TunnelClient::new([192, 168, 1, 10], 3671);
@@ -162,8 +162,8 @@ impl TunnelClient<Idle> {
     ///
     /// # Examples
     /// ```rust,no_run
-    /// use knx_rs::protocol::tunnel::TunnelClient;
-    /// use knx_rs::Ipv4Addr;
+    /// use knx_pico::protocol::tunnel::TunnelClient;
+    /// use knx_pico::Ipv4Addr;
     ///
     /// // From array
     /// let client = TunnelClient::new([192, 168, 1, 10], 3671);
@@ -203,7 +203,7 @@ impl TunnelClient<Idle> {
     ///
     /// # Examples
     /// ```rust,no_run
-    /// use knx_rs::protocol::tunnel::TunnelClient;
+    /// use knx_pico::protocol::tunnel::TunnelClient;
     ///
     /// // From arrays
     /// let client = TunnelClient::new_with_local_endpoint(

@@ -16,7 +16,7 @@ use core::fmt;
 /// # Examples
 ///
 /// ```
-/// use knx_rs::IndividualAddress;
+/// use knx_pico::IndividualAddress;
 ///
 /// // Create from components
 /// let addr = IndividualAddress::new(1, 1, 5).unwrap();
@@ -61,11 +61,11 @@ impl IndividualAddress {
     /// # Examples
     ///
     /// ```
-    /// use knx_rs::IndividualAddress;
+    /// use knx_pico::IndividualAddress;
     ///
     /// let addr = IndividualAddress::new(1, 1, 5)?;
     /// assert_eq!(addr.to_string(), "1.1.5");
-    /// # Ok::<(), knx_rs::KnxError>(())
+    /// # Ok::<(), knx_pico::KnxError>(())
     /// ```
     pub fn new(area: u8, line: u8, device: u8) -> Result<Self> {
         if area > Self::MAX_AREA {
@@ -87,11 +87,11 @@ impl IndividualAddress {
     /// # Examples
     ///
     /// ```
-    /// use knx_rs::IndividualAddress;
+    /// use knx_pico::IndividualAddress;
     ///
     /// let addr = IndividualAddress::from_array([1, 1, 5])?;
     /// assert_eq!(addr.to_string(), "1.1.5");
-    /// # Ok::<(), knx_rs::KnxError>(())
+    /// # Ok::<(), knx_pico::KnxError>(())
     /// ```
     pub fn from_array(parts: [u8; 3]) -> Result<Self> {
         Self::new(parts[0], parts[1], parts[2])

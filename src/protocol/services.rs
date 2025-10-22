@@ -14,8 +14,8 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::protocol::services::ConnectRequest;
-//! use knx_rs::protocol::frame::Hpai;
+//! use knx_pico::protocol::services::ConnectRequest;
+//! use knx_pico::protocol::frame::Hpai;
 //!
 //! // Build a connection request
 //! let control = Hpai::new([192, 168, 1, 100], 3671);

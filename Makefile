@@ -3,7 +3,7 @@
 
 # Default target
 help:
-	@echo "knx-rs Makefile"
+	@echo "knx-pico Makefile"
 	@echo ""
 	@echo "Available targets:"
 	@echo "  test              - Run all tests (unit + integration + examples)"

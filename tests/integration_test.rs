@@ -1,4 +1,4 @@
-//! Integration tests for knx-rs library
+//! Integration tests for knx-pico library
 //!
 //! These tests verify that the library works correctly with the KNX simulator.
 //!
@@ -18,8 +18,8 @@ use std::net::{UdpSocket, Ipv4Addr, SocketAddrV4};
 use std::time::Duration;
 
 // Only import types from the library crate
-use knx_rs::addressing::{GroupAddress, IndividualAddress};
-use knx_rs::protocol::tunnel::TunnelClient;
+use knx_pico::addressing::{GroupAddress, IndividualAddress};
+use knx_pico::protocol::tunnel::TunnelClient;
 
 const SIMULATOR_IP: [u8; 4] = [127, 0, 0, 1];
 const SIMULATOR_PORT: u16 = 3671;
@@ -165,8 +165,8 @@ fn test_individual_address_creation() {
 
 /// Helper function to build a test CEMI frame
 fn build_test_cemi_frame() -> [u8; 11] {
-    use knx_rs::protocol::cemi::{ControlField1, ControlField2};
-    use knx_rs::protocol::constants::CEMIMessageCode;
+    use knx_pico::protocol::cemi::{ControlField1, ControlField2};
+    use knx_pico::protocol::constants::CEMIMessageCode;
 
     let mut frame = [0u8; 11];
     frame[0] = CEMIMessageCode::LDataReq.to_u8();

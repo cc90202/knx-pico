@@ -1,4 +1,4 @@
-# Pre-Publish Guide for knx-rs
+# Pre-Publish Guide for knx-pico
 
 This guide explains how to verify that everything works before publishing to crates.io.
 

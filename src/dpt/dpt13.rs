@@ -21,7 +21,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::dpt::{Dpt13, DptDecode};
+//! use knx_pico::dpt::{Dpt13, DptDecode};
 //!
 //! // Decode active energy in Wh
 //! let wh = Dpt13::ActiveEnergy.decode(&[0x00, 0x07, 0xA1, 0x20])?;  // 500000 Wh

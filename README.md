@@ -95,7 +95,7 @@ KNX communication uses three nested protocol layers:
 ### Module Structure
 
 ```text
-knx-rs/
+knx-pico/
 ├── addressing/          # KNX addressing (Individual & Group)
 ├── protocol/            # KNXnet/IP protocol implementation
 │   ├── frame.rs         # Layer 1: KNXnet/IP frames
@@ -121,7 +121,7 @@ knx-rs/
 The library provides macros to simplify common operations:
 
 ```rust
-use knx_rs::{ga, knx_write, knx_read, KnxValue};
+use knx_pico::{ga, knx_write, knx_read, KnxValue};
 
 // Create group addresses with readable notation
 let light = ga!(1/2/3);
@@ -233,7 +233,7 @@ See [TESTING.md](TESTING.md) for detailed testing guide.
 The library automatically discovers KNX gateways using multicast SEARCH_REQUEST:
 
 ```rust
-use knx_rs::knx_discovery;
+use knx_pico::knx_discovery;
 use embassy_time::Duration;
 
 // Discover gateway (3 second timeout)
@@ -269,7 +269,7 @@ See [`src/dpt/`](src/dpt/) for implementation details.
 - **[KNX_DISCOVERY.md](KNX_DISCOVERY.md)** - Gateway discovery details
 - **[PRE_PUBLISH_GUIDE.md](PRE_PUBLISH_GUIDE.md)** - Pre-publish checklist
 - **[examples/README.md](examples/README.md)** - Example documentation
-- **[API Documentation](https://docs.rs/knx-rs)** - Full API reference
+- **[API Documentation](https://docs.rs/knx-pico)** - Full API reference
 
 ## Project Status
 

@@ -57,8 +57,8 @@ use defmt_rtt as _;
 // Network stack imports
 use embassy_net::{Config, StackResources};
 
-// Import unified logging macro and convenience macros from knx_rs crate
-use knx_rs::{pico_log, knx_read, knx_write, ga};
+// Import unified logging macro and convenience macros from knx_pico crate
+use knx_pico::{pico_log, knx_read, knx_write, ga};
 
 // Program metadata for `picotool info`
 #[unsafe(link_section = ".bi_entries")]

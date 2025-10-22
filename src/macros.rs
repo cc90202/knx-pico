@@ -22,7 +22,7 @@
 /// # Examples
 ///
 /// ```no_run
-/// use knx_rs::ga;
+/// use knx_pico::ga;
 ///
 /// // Create group address 1/2/3
 /// let addr = ga!(1/2/3);
@@ -53,7 +53,7 @@
 /// # Equivalent Code
 ///
 /// ```rust
-/// use knx_rs::addressing::GroupAddress;
+/// use knx_pico::addressing::GroupAddress;
 ///
 /// // Using macro
 /// let addr1 = ga!(1/2/3);
@@ -103,7 +103,7 @@ macro_rules! ga {
 /// # Examples
 ///
 /// ```no_run
-/// use knx_rs::{register_dpts, DptType};
+/// use knx_pico::{register_dpts, DptType};
 ///
 /// register_dpts! {
 ///     client,
@@ -141,7 +141,7 @@ macro_rules! ga {
 /// # Equivalent Code
 ///
 /// ```rust
-/// use knx_rs::{ga, DptType};
+/// use knx_pico::{ga, DptType};
 ///
 /// // Using macro
 /// register_dpts! {
@@ -186,7 +186,7 @@ macro_rules! register_dpts {
 /// # Examples
 ///
 /// ```no_run
-/// use knx_rs::{knx_write, KnxValue};
+/// use knx_pico::{knx_write, KnxValue};
 ///
 /// // Turn on a light
 /// knx_write!(client, 1/2/3, KnxValue::Bool(true)).await?;
@@ -207,7 +207,7 @@ macro_rules! register_dpts {
 /// # Equivalent Code
 ///
 /// ```rust
-/// use knx_rs::{ga, KnxValue};
+/// use knx_pico::{ga, KnxValue};
 ///
 /// // Using macro
 /// knx_write!(client, 1/2/3, KnxValue::Bool(true)).await?;
@@ -236,7 +236,7 @@ macro_rules! knx_write {
 /// # Examples
 ///
 /// ```no_run
-/// use knx_rs::knx_read;
+/// use knx_pico::knx_read;
 ///
 /// // Request temperature value
 /// knx_read!(client, 1/2/10).await?;
@@ -262,7 +262,7 @@ macro_rules! knx_write {
 /// # Equivalent Code
 ///
 /// ```rust
-/// use knx_rs::ga;
+/// use knx_pico::ga;
 ///
 /// // Using macro
 /// knx_read!(client, 1/2/3).await?;
@@ -291,7 +291,7 @@ macro_rules! knx_read {
 /// # Examples
 ///
 /// ```no_run
-/// use knx_rs::{knx_respond, KnxValue, KnxEvent};
+/// use knx_pico::{knx_respond, KnxValue, KnxEvent};
 ///
 /// // Respond to read requests
 /// match client.receive_event().await? {
@@ -312,7 +312,7 @@ macro_rules! knx_read {
 /// # Equivalent Code
 ///
 /// ```rust
-/// use knx_rs::{ga, KnxValue};
+/// use knx_pico::{ga, KnxValue};
 ///
 /// // Using macro
 /// knx_respond!(client, 1/2/3, KnxValue::Bool(true)).await?;
