@@ -3,6 +3,8 @@
 //! This file includes the common modules needed by examples.
 //! It's a workaround since examples cannot directly use `mod` from src/.
 
+#![allow(dead_code)]
+
 #[path = "../src/configuration.rs"]
 pub mod configuration;
 

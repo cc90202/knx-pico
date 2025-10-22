@@ -10,10 +10,11 @@
 //! - KNX gateway on local network OR KNX simulator (see TESTING.md)
 //!
 //! ## Configuration
-//! 1. Edit the constants below before compiling:
-//!    - `WIFI_SSID`: Your WiFi network name
+//! Edit `src/configuration.rs` to set your WiFi credentials:
+//!    - `WIFI_NETWORK`: Your WiFi network name
 //!    - `WIFI_PASSWORD`: Your WiFi password
-//!    - `KNX_GATEWAY_IP`: IP address of KNX gateway or simulator
+//!
+//! The KNX gateway is automatically discovered via multicast - no manual configuration needed!
 //!
 //! ## Flash to Pico
 //!
@@ -33,15 +34,18 @@
 #![no_std]
 #![no_main]
 
+mod common;
+
+use common::knx_discovery;
+use common::utility::{get_ssid, get_wifi_password};
 use defmt::unwrap;
 use embassy_executor::Spawner;
 use embassy_net::{Config, StackResources};
 use embassy_net::udp::PacketMetadata;
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Level, Output};
-use embassy_rp::peripherals::{DMA_CH0, PIO0, USB};
+use embassy_rp::peripherals::{DMA_CH0, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
-use embassy_rp::usb::{Driver, InterruptHandler as UsbInterruptHandler};
 use embassy_time::{Duration, Timer};
 use static_cell::StaticCell;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -49,28 +53,32 @@ use embassy_sync::mutex::Mutex;
 use {defmt_rtt as _, panic_persist as _};
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 
+// Conditional imports for USB logger
+#[cfg(feature = "usb-logger")]
+use embassy_rp::peripherals::USB;
+#[cfg(feature = "usb-logger")]
+use embassy_rp::usb::{Driver, InterruptHandler as UsbInterruptHandler};
+
 use knx_rs::addressing::GroupAddress;
 use knx_rs::protocol::async_tunnel::AsyncTunnelClient;
 use knx_rs::protocol::cemi::{ControlField1, ControlField2, Apci};
 use knx_rs::protocol::constants::CEMIMessageCode;
 use knx_rs::addressing::IndividualAddress;
+use knx_rs::{pico_log, ga};
 
 // ============================================================================
 // Configuration
 // ============================================================================
+// WiFi credentials are loaded from src/configuration.rs
+// Edit that file to set your WIFI_NETWORK and WIFI_PASSWORD
 
-const WIFI_SSID: &str = "YOUR_WIFI_SSID";
-const WIFI_PASSWORD: &str = "YOUR_WIFI_PASSWORD";
+// KNX Gateway Discovery
+// The gateway is automatically discovered via multicast SEARCH_REQUEST
+// No manual configuration needed!
 
-// KNX Gateway configuration (Mac IP address running the simulator)
-const KNX_GATEWAY_IP: [u8; 4] = [192, 168, 1, 23];
-const KNX_GATEWAY_PORT: u16 = 3671;
-
-// Example KNX group addresses (3-level: main/middle/sub)
-// 1/2/3 = 0x0A03, calculated as: (1 << 11) | (2 << 8) | 3
-const LIGHT_LIVING_ROOM_RAW: u16 = 0x0A03; // 1/2/3
-#[allow(dead_code)] // Reserved for additional examples
-const LIGHT_BEDROOM_RAW: u16 = 0x0A04;     // 1/2/4
+// Example KNX group addresses
+// Note: These are example addresses - adjust to match your KNX installation
+// Using ga! macro for readable 3-level addressing (main/middle/sub)
 
 // Our virtual KNX device address (area.line.device = 1.1.1)
 // Calculated as: (1 << 12) | (1 << 8) | 1 = 0x1101
@@ -84,6 +92,7 @@ bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
 
+#[cfg(feature = "usb-logger")]
 bind_interrupts!(struct UsbIrqs {
     USBCTRL_IRQ => UsbInterruptHandler<USB>;
 });
@@ -109,9 +118,10 @@ async fn wifi_task(
 }
 
 // ============================================================================
-// USB Logger Task
+// USB Logger Task (only with usb-logger feature)
 // ============================================================================
 
+#[cfg(feature = "usb-logger")]
 #[embassy_executor::task]
 async fn logger_task(driver: Driver<'static, USB>) {
     embassy_usb_logger::run!(1024, log::LevelFilter::Info, driver);
@@ -144,19 +154,22 @@ async fn blink_task(shared_control: SharedControl) -> ! {
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    // Start USB logger (must be first)
-    let driver = Driver::new(p.USB, UsbIrqs);
-    spawner.must_spawn(logger_task(driver));
+    // Start appropriate logger based on active feature
+    #[cfg(feature = "usb-logger")]
+    {
+        let driver = Driver::new(p.USB, UsbIrqs);
+        spawner.must_spawn(logger_task(driver));
+    }
 
     // Check for panic messages
     if let Some(panic_message) = panic_persist::get_panic_message_utf8() {
-        log::error!("{panic_message}");
+        pico_log!(error, "{}", panic_message);
         loop {
             Timer::after(Duration::from_secs(5)).await;
         }
     }
 
-    log::info!("Starting Pico 2 W KNX Example");
+    pico_log!(info, "Starting Pico 2 W KNX Example");
 
     // ========================================================================
     // WiFi Initialization
@@ -210,22 +223,26 @@ async fn main(spawner: Spawner) {
     // WiFi Connection
     // ========================================================================
 
-    log::info!("Connecting to WiFi: {}", WIFI_SSID);
+    // Load WiFi credentials from configuration.rs
+    let wifi_ssid = get_ssid();
+    let wifi_password = get_wifi_password();
+
+    pico_log!(info, "Connecting to WiFi: {}", wifi_ssid);
 
     loop {
         match control
             .join(
-                WIFI_SSID,
-                cyw43::JoinOptions::new(WIFI_PASSWORD.as_bytes()),
+                wifi_ssid,
+                cyw43::JoinOptions::new(wifi_password.as_bytes()),
             )
             .await
         {
             Ok(_) => {
-                log::info!("WiFi connected successfully!");
+                pico_log!(info, "WiFi connected successfully!");
                 break;
             }
             Err(e) => {
-                log::error!("WiFi connection failed: status={}, retrying in 5s...", e.status);
+                pico_log!(error, "WiFi connection failed: status={}, retrying in 5s...", e.status);
                 Timer::after(Duration::from_secs(5)).await;
             }
         }
@@ -239,19 +256,43 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(blink_task(shared_control)));
 
     // Wait for DHCP
-    log::info!("Waiting for IP address...");
+    pico_log!(info, "Waiting for IP address...");
     stack.wait_config_up().await;
 
     if let Some(config) = stack.config_v4() {
-        log::info!("IP Address: {:?}", config.address.address());
+        pico_log!(info, "IP Address: {:?}", config.address.address());
     }
+
+    // ========================================================================
+    // KNX Gateway Discovery
+    // ========================================================================
+
+    pico_log!(info, "Discovering KNX gateway via multicast...");
+
+    let (knx_gateway_ip, knx_gateway_port) = match knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
+        Some(gateway) => {
+            pico_log!(info, "✓ KNX Gateway discovered automatically!");
+            pico_log!(info, "  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
+            pico_log!(info, "  Port: {}", gateway.port);
+            (gateway.ip, gateway.port)
+        }
+        None => {
+            pico_log!(error, "✗ No KNX gateway found on network!");
+            pico_log!(error, "  Ensure your KNX gateway or simulator is running");
+            pico_log!(error, "  and connected to the same network.");
+            pico_log!(info, "System halted. Reset device to retry.");
+            loop {
+                Timer::after(Duration::from_secs(30)).await;
+            }
+        }
+    };
 
     // ========================================================================
     // KNX Connection
     // ========================================================================
 
-    log::info!("Connecting to KNX gateway at {}.{}.{}.{}:{}",
-          KNX_GATEWAY_IP[0], KNX_GATEWAY_IP[1], KNX_GATEWAY_IP[2], KNX_GATEWAY_IP[3], KNX_GATEWAY_PORT);
+    pico_log!(info, "Connecting to KNX gateway at {}.{}.{}.{}:{}",
+          knx_gateway_ip[0], knx_gateway_ip[1], knx_gateway_ip[2], knx_gateway_ip[3], knx_gateway_port);
 
     // Allocate buffers for AsyncTunnelClient
     static RX_META: StaticCell<[PacketMetadata; 4]> = StaticCell::new();
@@ -270,15 +311,15 @@ async fn main(spawner: Spawner) {
         tx_meta,
         rx_buffer,
         tx_buffer,
-        KNX_GATEWAY_IP,
-        KNX_GATEWAY_PORT,
+        knx_gateway_ip,
+        knx_gateway_port,
     );
 
     // Connect to gateway
     match client.connect().await {
-        Ok(_) => log::info!("✓ Connected to KNX gateway"),
+        Ok(_) => pico_log!(info, "✓ Connected to KNX gateway"),
         Err(_e) => {
-            log::error!("Failed to connect to KNX gateway");
+            pico_log!(error, "Failed to connect to KNX gateway");
             return;
         }
     }
@@ -287,13 +328,13 @@ async fn main(spawner: Spawner) {
     // Example 1: Turn on living room light
     // ========================================================================
 
-    log::info!("Example 1: Turning ON living room light (1/2/3)");
+    pico_log!(info, "Example 1: Turning ON living room light (1/2/3)");
 
-    let light_addr = GroupAddress::from(LIGHT_LIVING_ROOM_RAW);
+    let light_addr = ga!(1/2/3);
     let cemi_on = build_group_write_bool(light_addr, true);
     match client.send_cemi(&cemi_on).await {
-        Ok(_) => log::info!("✓ Command sent successfully"),
-        Err(_e) => log::error!("Failed to send command"),
+        Ok(_) => pico_log!(info, "✓ Command sent successfully"),
+        Err(_e) => pico_log!(error, "Failed to send command"),
     }
 
     Timer::after(Duration::from_secs(2)).await;
@@ -302,21 +343,87 @@ async fn main(spawner: Spawner) {
     // Example 2: Turn off living room light
     // ========================================================================
 
-    log::info!("Example 2: Turning OFF living room light");
+    pico_log!(info, "Example 2: Turning OFF living room light");
 
     let cemi_off = build_group_write_bool(light_addr, false);
     match client.send_cemi(&cemi_off).await {
-        Ok(_) => log::info!("✓ Command sent successfully"),
-        Err(_e) => log::error!("Failed to send command"),
+        Ok(_) => pico_log!(info, "✓ Command sent successfully"),
+        Err(_e) => pico_log!(error, "Failed to send command"),
     }
 
     Timer::after(Duration::from_secs(2)).await;
 
     // ========================================================================
-    // Example 3: Listen for events from KNX bus
+    // Example 3: DPT 3 - Dimming Control (increase brightness)
     // ========================================================================
 
-    log::info!("Example 3: Listening for KNX bus events (press Ctrl+C to stop)...");
+    pico_log!(info, "Example 3: DPT 3 - Dimmer increase brightness (4 steps)");
+
+    let dimmer_addr = ga!(1/2/5);
+    // DPT 3.007: Control Dimming
+    // Byte format: cccc SUUU
+    //   c = control (0011 = increase/decrease command)
+    //   S = step flag (1 = increase, 0 = decrease)
+    //   U = step code (number of intervals, 0-7)
+    // Example: 0x0B = 0000 1011 = increase by 4 steps
+    let cemi_dim_up = build_group_write_dpt3(dimmer_addr, 0x0B);
+    match client.send_cemi(&cemi_dim_up).await {
+        Ok(_) => pico_log!(info, "✓ Dimmer command sent"),
+        Err(_e) => pico_log!(error, "Failed to send dimmer command"),
+    }
+
+    Timer::after(Duration::from_secs(2)).await;
+
+    // ========================================================================
+    // Example 4: DPT 5 - Percentage (0-100%)
+    // ========================================================================
+
+    pico_log!(info, "Example 4: DPT 5 - Set valve position to 75%");
+
+    let valve_addr = ga!(1/2/6);
+    // DPT 5.001: Percentage (0-100%)
+    // Range: 0x00 (0%) to 0xFF (100%)
+    // 75% = 0xFF * 0.75 = 191 = 0xBF
+    let cemi_valve = build_group_write_dpt5(valve_addr, 0xBF);
+    match client.send_cemi(&cemi_valve).await {
+        Ok(_) => pico_log!(info, "✓ Valve position set to 75%"),
+        Err(_e) => pico_log!(error, "Failed to set valve position"),
+    }
+
+    Timer::after(Duration::from_secs(2)).await;
+
+    // ========================================================================
+    // Example 5: DPT 9 - Temperature (write 21.5°C)
+    // ========================================================================
+
+    pico_log!(info, "Example 5: DPT 9 - Set temperature setpoint to 21.5°C");
+
+    let temp_addr = ga!(1/2/7);  // Temperature sensor/setpoint
+    // DPT 9.001: Temperature (2-byte float)
+    // Format: MEEE EMMM MMMM MMMM
+    //   M = mantissa (11-bit signed)
+    //   E = exponent (4-bit signed)
+    // Value = (0.01 * M) * 2^E
+    // For 21.5°C: M=2150, E=0
+    // Encoding: 0x0C 0x66 (calculated for 21.5)
+    let cemi_temp = build_group_write_dpt9(temp_addr, 0x0C, 0x66);
+    match client.send_cemi(&cemi_temp).await {
+        Ok(_) => pico_log!(info, "✓ Temperature setpoint written"),
+        Err(_e) => pico_log!(error, "Failed to write temperature"),
+    }
+
+    Timer::after(Duration::from_secs(2)).await;
+
+    // ========================================================================
+    // Example 6: Listen for events from KNX bus
+    // ========================================================================
+
+    pico_log!(info, "Example 6: Listening for KNX bus events (press Ctrl+C to stop)...");
+    pico_log!(info, "");
+    pico_log!(info, "=== All examples completed successfully! ===");
+    pico_log!(info, "Now entering passive monitoring mode...");
+    pico_log!(info, "The device will display any KNX traffic on the bus.");
+    pico_log!(info, "");
 
     // NOTE: In a real application, you should call client.send_heartbeat()
     // every 60 seconds to keep the connection alive. The gateway will close
@@ -329,10 +436,12 @@ async fn main(spawner: Spawner) {
     //     last_heartbeat = embassy_time::Instant::now();
     // }
 
+    let mut event_count = 0;
     loop {
         match client.receive().await {
             Ok(Some(cemi_data)) => {
-                log::info!("Received cEMI frame ({} bytes)", cemi_data.len());
+                event_count += 1;
+                pico_log!(info, "[Event #{}] Received cEMI frame ({} bytes)", event_count, cemi_data.len());
 
                 // Parse the cEMI frame
                 if let Ok(cemi) = knx_rs::protocol::cemi::CEMIFrame::parse(cemi_data) {
@@ -340,7 +449,7 @@ async fn main(spawner: Spawner) {
                         if ldata.is_group_write() {
                             if let Some(dest) = ldata.destination_group() {
                                 let dest_raw: u16 = dest.into();
-                                log::info!("  GroupValue_Write to {:04X}: {} bytes",
+                                pico_log!(info, "  GroupValue_Write to {:04X}: {} bytes",
                                       dest_raw, ldata.data.len());
 
                                 // Example: decode boolean value (DPT 1)
@@ -348,14 +457,14 @@ async fn main(spawner: Spawner) {
                                     // Value encoded in APCI (6-bit)
                                     if let Apci::GroupValueWrite = ldata.apci {
                                         // For proper decoding, would need actual APCI byte
-                                        log::info!("    Boolean value (encoded in APCI)");
+                                        pico_log!(info, "    Boolean value (encoded in APCI)");
                                     }
                                 }
                             }
                         } else if ldata.is_group_read() {
                             if let Some(dest) = ldata.destination_group() {
                                 let dest_raw: u16 = dest.into();
-                                log::info!("  GroupValue_Read from {:04X}", dest_raw);
+                                pico_log!(info, "  GroupValue_Read from {:04X}", dest_raw);
                             }
                         }
                     }
@@ -365,7 +474,7 @@ async fn main(spawner: Spawner) {
                 // No data available (timeout)
             }
             Err(_e) => {
-                log::error!("Receive error");
+                pico_log!(error, "Receive error");
             }
         }
 
@@ -452,6 +561,147 @@ fn build_group_read(group_addr: GroupAddress) -> [u8; 10] {
 
     // TPCI + APCI
     frame[9] = 0x00; // TPCI (unnumbered data) + APCI (GroupValueRead = 0x000)
+
+    frame
+}
+
+/// Build a cEMI L_Data.req frame for GroupValue_Write with DPT 3 (4-bit control)
+///
+/// DPT 3.007: Dimming Control
+/// DPT 3.008: Blinds Control
+///
+/// Byte format: cccc SUUU
+///   - c = control field (always 0000 for step commands)
+///   - S = step direction (1 = increase/up, 0 = decrease/down)
+///   - U = step code (0-7, number of intervals)
+///
+/// Common values:
+/// - 0x01: Decrease by 1 step
+/// - 0x09: Increase by 1 step (0000 1001)
+/// - 0x0B: Increase by 4 steps (0000 1011)
+/// - 0x0F: Increase by 100% (0000 1111)
+fn build_group_write_dpt3(group_addr: GroupAddress, value: u8) -> [u8; 11] {
+    let mut frame = [0u8; 11];
+
+    let device_addr = IndividualAddress::from(DEVICE_ADDRESS_RAW);
+
+    frame[0] = CEMIMessageCode::LDataReq.to_u8();
+    frame[1] = 0x00;
+    frame[2] = ControlField1::default().raw();
+    frame[3] = ControlField2::default().raw();
+
+    let source_raw: u16 = device_addr.into();
+    let source_bytes = source_raw.to_be_bytes();
+    frame[4] = source_bytes[0];
+    frame[5] = source_bytes[1];
+
+    let dest_raw: u16 = group_addr.into();
+    let dest_bytes = dest_raw.to_be_bytes();
+    frame[6] = dest_bytes[0];
+    frame[7] = dest_bytes[1];
+
+    // NPDU length: 1 byte (TPCI/APCI with 6-bit value)
+    frame[8] = 0x01;
+
+    // TPCI + APCI high bits
+    frame[9] = 0x00;
+
+    // APCI GroupValueWrite (0x80) + 4-bit value in lower nibble
+    frame[10] = 0x80 | (value & 0x0F);
+
+    frame
+}
+
+/// Build a cEMI L_Data.req frame for GroupValue_Write with DPT 5 (8-bit unsigned)
+///
+/// DPT 5.001: Percentage (0-100%)
+/// DPT 5.003: Angle (0-360 degrees)
+/// DPT 5.010: Counter (0-255)
+///
+/// Value range: 0x00 (0%) to 0xFF (100%)
+fn build_group_write_dpt5(group_addr: GroupAddress, value: u8) -> [u8; 12] {
+    let mut frame = [0u8; 12];
+
+    let device_addr = IndividualAddress::from(DEVICE_ADDRESS_RAW);
+
+    frame[0] = CEMIMessageCode::LDataReq.to_u8();
+    frame[1] = 0x00;
+    frame[2] = ControlField1::default().raw();
+    frame[3] = ControlField2::default().raw();
+
+    let source_raw: u16 = device_addr.into();
+    let source_bytes = source_raw.to_be_bytes();
+    frame[4] = source_bytes[0];
+    frame[5] = source_bytes[1];
+
+    let dest_raw: u16 = group_addr.into();
+    let dest_bytes = dest_raw.to_be_bytes();
+    frame[6] = dest_bytes[0];
+    frame[7] = dest_bytes[1];
+
+    // NPDU length: 2 bytes (TPCI/APCI + 1 data byte)
+    frame[8] = 0x02;
+
+    // TPCI + APCI high bits
+    frame[9] = 0x00;
+
+    // APCI GroupValueWrite (0x80)
+    frame[10] = 0x80;
+
+    // Data value
+    frame[11] = value;
+
+    frame
+}
+
+/// Build a cEMI L_Data.req frame for GroupValue_Write with DPT 9 (2-byte float)
+///
+/// DPT 9.001: Temperature (°C)
+/// DPT 9.004: Illuminance (lux)
+/// DPT 9.005: Wind speed (m/s)
+///
+/// Format: MEEE EMMM MMMM MMMM
+///   - M = mantissa (11-bit signed, -2048 to 2047)
+///   - E = exponent (4-bit signed, -8 to 7)
+///
+/// Value = (0.01 * M) * 2^E
+///
+/// Examples:
+///   - 21.5°C: high=0x0C, low=0x66 (M=2150, E=0)
+///   - -5.0°C: high=0x87, low=0x0C (M=-500, E=0)
+///   - 100.0: high=0x2E, low=0x10 (M=625, E=4)
+fn build_group_write_dpt9(group_addr: GroupAddress, high: u8, low: u8) -> [u8; 13] {
+    let mut frame = [0u8; 13];
+
+    let device_addr = IndividualAddress::from(DEVICE_ADDRESS_RAW);
+
+    frame[0] = CEMIMessageCode::LDataReq.to_u8();
+    frame[1] = 0x00;
+    frame[2] = ControlField1::default().raw();
+    frame[3] = ControlField2::default().raw();
+
+    let source_raw: u16 = device_addr.into();
+    let source_bytes = source_raw.to_be_bytes();
+    frame[4] = source_bytes[0];
+    frame[5] = source_bytes[1];
+
+    let dest_raw: u16 = group_addr.into();
+    let dest_bytes = dest_raw.to_be_bytes();
+    frame[6] = dest_bytes[0];
+    frame[7] = dest_bytes[1];
+
+    // NPDU length: 3 bytes (TPCI/APCI + 2 data bytes)
+    frame[8] = 0x03;
+
+    // TPCI + APCI high bits
+    frame[9] = 0x00;
+
+    // APCI GroupValueWrite (0x80)
+    frame[10] = 0x80;
+
+    // Data bytes (2-byte float)
+    frame[11] = high;
+    frame[12] = low;
 
     frame
 }
