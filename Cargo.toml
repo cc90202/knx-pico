@@ -1,5 +1,5 @@
 [package]
-name = "knx-rs"
+name = "knx-pico"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -27,7 +27,7 @@ exclude = [
 ]
 
 [lib]
-name = "knx_rs"
+name = "knx_pico"
 path = "src/lib.rs"
 
 [dependencies]
