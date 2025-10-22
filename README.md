@@ -88,8 +88,8 @@ KNX communication uses three nested protocol layers:
 
 | Layer | Purpose | Example |
 |-------|---------|---------|
-| **DPT** | Encode values | `21.5°C` → `[0x0C, 0x1A]` |
-| **CEMI** | KNX commands | "Write to 1/2/3: [0x01]" |
+| **DPT** | Encode values | `21.5°C` → `\[0x0C, 0x1A\]` |
+| **CEMI** | KNX commands | "Write to 1/2/3: \[0x01\]" |
 | **KNXnet/IP** | IP transport | UDP to 192.168.1.10:3671 |
 
 ### Module Structure
