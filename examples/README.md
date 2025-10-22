@@ -2,6 +2,19 @@
 
 This directory contains practical examples demonstrating how to use `knx-rs` library.
 
+## Prerequisites
+
+**⚠️ Important:** All examples require either:
+- **Physical KNX hardware**: A KNX/IP gateway on your local network (e.g., Gira X1, MDT SCN-IP000.03, etc.)
+- **Simulator**: For testing without physical hardware, run the KNX gateway simulator:
+
+```bash
+# Start the simulator (in a separate terminal)
+python3 knx_search.py
+```
+
+The simulator must be running before executing any examples. See [../TESTING.md](../TESTING.md) for detailed setup instructions.
+
 ## Examples
 
 ### `pico_knx_async.rs`
@@ -16,7 +29,7 @@ Complete example showing KNX communication with Raspberry Pi Pico 2 W over WiFi.
 
 **Hardware Requirements:**
 - Raspberry Pi Pico 2 W
-- KNX gateway on local network (e.g., Gira X1, MDT SCN-IP000.03, etc.)
+- KNX gateway on local network **OR** KNX simulator (see Prerequisites above)
 - WiFi network
 
 **Setup:**
@@ -119,6 +132,66 @@ The KNX gateway will close the tunnel if no heartbeat is received for ~120 secon
 - **KNX connection fails**: Verify gateway IP, ensure UDP port 3671 is accessible
 - **No response from devices**: Check group addresses match your ETS configuration
 - **Compilation errors**: Ensure CYW43 firmware files are in `cyw43-firmware/` directory
+
+---
+
+### `knx_sniffer.rs`
+
+Interactive KNX sniffer/tester tool for debugging and testing KNX communication.
+
+**Features:**
+- Gateway discovery via multicast
+- Read and write operations
+- Event monitoring
+- USB or defmt logging support
+
+**Hardware Requirements:**
+- Raspberry Pi Pico 2 W
+- KNX gateway on local network **OR** KNX simulator (see Prerequisites above)
+- WiFi network
+
+**Setup and Running:**
+
+**Option 1: USB Logger (recommended for interactive debugging)**
+```bash
+# Build and flash with USB logger
+cargo flash-sniffer-usb-release
+
+# Open serial monitor to view output
+screen /dev/tty.usbmodem* 115200
+```
+
+**Option 2: defmt Logger (faster logging)**
+```bash
+# Build and flash with defmt
+cargo flash-sniffer-release
+
+# Logs visible via probe-rs
+```
+
+**Available Commands:**
+```bash
+# Check compilation
+cargo check-sniffer-usb      # USB logger
+cargo check-sniffer          # defmt logger
+
+# Build
+cargo build-sniffer-usb-release    # USB + release
+cargo build-sniffer-release        # defmt + release
+
+# Flash to Pico
+cargo flash-sniffer-usb-release    # USB + release (recommended)
+cargo flash-sniffer-release        # defmt + release
+```
+
+**What it does:**
+1. Connects to WiFi
+2. Discovers KNX gateway via multicast
+3. Establishes tunnel connection
+4. Performs test read/write operations
+5. Monitors KNX bus events
+
+**Note:** Ensure the KNX simulator is running if you don't have physical hardware!
 
 ## Building Examples
 
