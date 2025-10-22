@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Pre-release checks
+  pre-release:
+    name: Pre-release Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv8m.main-none-eabihf
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Run full test suite
+      - name: Run all tests
+        run: python3 test_runner.py --verbose
+
+      # Verify version matches tag
+      - name: Check version
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          CARGO_VERSION=$(grep "^version" Cargo.toml | head -1 | cut -d'"' -f2)
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "Version mismatch: tag=$TAG_VERSION, Cargo.toml=$CARGO_VERSION"
+            exit 1
+          fi
+          echo "Version check passed: $TAG_VERSION"
+
+      # Check documentation
+      - name: Build documentation
+        run: cargo doc --no-deps --lib --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings -D missing_docs
+
+      # Dry-run publish
+      - name: Dry-run publish
+        run: cargo publish --dry-run
+
+  # Publish to crates.io
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: pre-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        run: cargo publish --token ${CRATES_TOKEN}
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+
+  # Create GitHub Release
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: publish
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract release notes
+        id: extract_notes
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ steps.extract_notes.outputs.version }}
+          body: |
+            ## knx-rs ${{ steps.extract_notes.outputs.version }}
+
+            See [CHANGELOG.md](CHANGELOG.md) for details.
+
+            ### Installation
+
+            ```toml
+            [dependencies]
+            knx-rs = "${{ steps.extract_notes.outputs.version }}"
+            ```
+
+            ### Documentation
+
+            - [docs.rs](https://docs.rs/knx-rs/${{ steps.extract_notes.outputs.version }})
+            - [crates.io](https://crates.io/crates/knx-rs)
+          draft: false
+          prerelease: false
