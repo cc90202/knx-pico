@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main, develop ]
+  pull_request:
+    branches: [ master, main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Check code formatting
+  fmt:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  # Check with Clippy
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # Build library (no_std)
+  build-lib:
+    name: Build Library (no_std)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build library
+        run: cargo build --lib --verbose
+      - name: Check library
+        run: cargo check --lib --verbose
+
+  # Unit tests on host
+  test-unit:
+    name: Unit Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run unit tests
+        run: cargo test --lib
+
+  # Integration tests with simulator
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Run integration tests
+        run: python3 test_runner.py --integration-only
+
+  # Check embedded targets compile
+  check-embedded:
+    name: Check Embedded Targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv8m.main-none-eabihf
+      - name: Install target
+        run: rustup target add thumbv8m.main-none-eabihf
+
+      # Check main binary
+      - name: Check RP2040 (defmt)
+        run: cargo check --bin knx-rs --features embassy-rp --target thumbv8m.main-none-eabihf
+
+      - name: Check RP2040 (USB)
+        run: cargo check --bin knx-rs --features embassy-rp-usb --target thumbv8m.main-none-eabihf
+
+      # Check examples
+      - name: Check knx_sniffer (defmt)
+        run: cargo check --example knx_sniffer --features embassy-rp --target thumbv8m.main-none-eabihf
+
+      - name: Check knx_sniffer (USB)
+        run: cargo check --example knx_sniffer --features embassy-rp-usb --target thumbv8m.main-none-eabihf
+
+      - name: Check pico_knx_async (USB)
+        run: cargo check --example pico_knx_async --features embassy-rp-usb --target thumbv8m.main-none-eabihf
+
+  # Verify examples compile
+  check-examples:
+    name: Check Examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv8m.main-none-eabihf
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Check examples
+        run: python3 test_runner.py --examples-only
+
+  # Full test suite
+  test-all:
+    name: Full Test Suite
+    runs-on: ubuntu-latest
+    needs: [fmt, clippy, build-lib, test-unit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv8m.main-none-eabihf
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Run all tests
+        run: python3 test_runner.py --verbose
+
+  # Check documentation builds
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check documentation
+        run: cargo doc --no-deps --lib --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # Security audit
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
