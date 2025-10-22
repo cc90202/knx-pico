@@ -1,37 +1,38 @@
 # KNX Gateway Discovery
 
-## Panoramica
+## Overview
 
-È stata implementata la funzionalità di **discovery automatica** del gateway KNX utilizzando il protocollo `SEARCH_REQUEST` / `SEARCH_RESPONSE`. Questo elimina la necessità di configurare manualmente l'indirizzo IP del gateway in `configuration.rs`.
+**Automatic discovery** of KNX gateways has been implemented using the `SEARCH_REQUEST` / `SEARCH_RESPONSE` protocol. This eliminates the need to manually configure the gateway IP address.
 
-## Come Funziona
+## How It Works
 
-1. All'avvio, il sistema invia un `SEARCH_REQUEST` all'indirizzo multicast KNX (224.0.23.12:3671)
-2. Il gateway KNX risponde con un `SEARCH_RESPONSE` contenente il suo indirizzo IP e porta
-3. Il sistema si connette automaticamente al gateway scoperto
-4. Se nessun gateway viene trovato entro 3 secondi, il sistema usa l'IP statico da `configuration.rs` come fallback
+1. At startup, the system sends a `SEARCH_REQUEST` to the KNX multicast address (224.0.23.12:3671)
+2. The KNX gateway responds with a `SEARCH_RESPONSE` containing its IP address and port
+3. The system automatically connects to the discovered gateway
+4. If no gateway is found within 3 seconds, the system halts with an error message
 
-## Architettura
+## Architecture
 
-### File Creati
+### Files Created
 
-- **`src/knx_discovery.rs`** - Modulo dedicato alla discovery KNX
-  - `discover_gateway()` - Funzione principale per scoprire il gateway
-  - `GatewayInfo` - Struct con IP e porta del gateway scoperto
-  - `build_search_request()` - Costruisce il pacchetto SEARCH_REQUEST (formato corretto con header_len 0x06)
-  - `parse_search_response()` - Parser per le risposte dei gateway
+- **`src/knx_discovery.rs`** - Dedicated KNX discovery module
+  - `discover_gateway()` - Main function to discover the gateway
+  - `GatewayInfo` - Struct containing discovered gateway IP and port
+  - `build_search_request()` - Constructs SEARCH_REQUEST packet (correct format with header_len 0x06)
+  - `parse_search_response()` - Parser for gateway responses
 
-### Modifiche ai File Esistenti
+### Modified Files
 
-- **`src/lib.rs`** - Aggiunto modulo `pub mod knx_discovery;`
-- **`src/main.rs`** - Aggiunta logica di discovery con flag di attivazione
+- **`src/lib.rs`** - Added module `pub mod knx_discovery;`
+- **`examples/pico_knx_async.rs`** - Uses discovery with error on failure
+- **`examples/knx_sniffer.rs`** - Uses discovery with error on failure
 
-## Formato Pacchetto SEARCH_REQUEST
+## SEARCH_REQUEST Packet Format
 
-Il bug critico risolto era l'assenza del byte `header_len` (0x06) all'inizio del pacchetto:
+The critical bug fixed was the missing `header_len` byte (0x06) at the start of the packet:
 
 ```
-FORMATO CORRETTO (14 bytes):
+CORRECT FORMAT (14 bytes):
 ┌────────────────────────────────────┐
 │ Header (6 bytes)                   │
 ├────────────────────────────────────┤
@@ -50,123 +51,95 @@ FORMATO CORRETTO (14 bytes):
 │ [2]   - local port (big-endian)    │
 └────────────────────────────────────┘
 
-FORMATO ERRATO (mancava 0x06):
+INCORRECT FORMAT (missing 0x06):
 0x10 0x02 0x01 0x00 0x0e ...  ❌
 ```
 
-## Utilizzo
+## Usage
 
-### Attivare la Discovery (Default)
+Discovery is **always enabled** in both examples. If no gateway is found, the system halts with a clear error message telling the user to:
+- Ensure the KNX gateway or simulator is running
+- Ensure it's connected to the same network
+- Reset the device to retry
 
-Nel file `src/main.rs`, la costante `USE_AUTO_DISCOVERY` è impostata su `true`:
+## Debug Logs
 
-```rust
-const USE_AUTO_DISCOVERY: bool = true;
-```
-
-Con questa impostazione:
-- ✓ Il sistema cerca automaticamente il gateway
-- ✓ Se trova un gateway, lo usa
-- ✓ Se non trova nulla, usa l'IP statico da configuration.rs
-
-### Disattivare la Discovery (Revert)
-
-Per tornare al comportamento precedente (solo configurazione statica):
-
-```rust
-const USE_AUTO_DISCOVERY: bool = false;
-```
-
-Con questa impostazione:
-- Il sistema usa SOLO l'IP configurato in `configuration.rs`
-- Non viene effettuata alcuna discovery
-- Comportamento identico alla versione precedente
-
-## Log di Debug
-
-Quando la discovery è attiva, vedrai questi messaggi:
+When discovery is active, you'll see these messages:
 
 ```
-Starting KNX gateway discovery (SEARCH)...
+Discovering KNX gateway via multicast...
 ✓ KNX Gateway discovered automatically!
   IP: 192.168.1.250
   Port: 3671
 ```
 
-Se la discovery fallisce:
+If discovery fails:
 
 ```
-Starting KNX gateway discovery (SEARCH)...
-✗ No gateway found via discovery, using static configuration
-  Fallback to: 192.168.1.29
-```
-
-Se la discovery è disattivata:
-
-```
-KNX Gateway (static config): 192.168.1.29
+Discovering KNX gateway via multicast...
+✗ No KNX gateway found on network!
+  Ensure your KNX gateway or simulator is running
+  and connected to the same network.
+System halted. Reset device to retry.
 ```
 
 ## Testing
 
-### Test Unitari
+### Unit Tests
 
-Il modulo include test per:
-- Costruzione corretta del pacchetto SEARCH_REQUEST
-- Parsing delle risposte SEARCH_RESPONSE
-- Calcolo dell'indirizzo di broadcast
+The module includes tests for:
+- Correct SEARCH_REQUEST packet construction
+- SEARCH_RESPONSE parsing
+- Broadcast address calculation
 
-Esegui i test con:
+Run tests with:
 
 ```bash
 cargo test --lib knx_discovery
 ```
 
-### Test con Simulatore
+### Testing with Simulator
 
-1. Avvia il simulatore KNX:
+1. Start the KNX simulator:
    ```bash
    python3 knx_simulator.py
    ```
 
-2. Compila e carica il firmware:
+2. Build and flash the firmware:
    ```bash
-   cargo build --release
-   ./flash.sh
+   cargo flash-example-usb
    ```
 
-3. Osserva i log per verificare la discovery
+3. Observe the logs to verify discovery
 
-## Vantaggi
+## Advantages
 
-✅ **Zero configurazione** - Non serve più conoscere l'IP del gateway  
-✅ **Resiliente** - Fallback automatico alla configurazione statica  
-✅ **Standard KNXnet/IP** - Implementazione conforme alle specifiche  
-✅ **Facile revert** - Basta cambiare una costante boolean  
-✅ **Testato** - Include test unitari e validazione formato pacchetto  
+✅ **Zero configuration** - No need to know the gateway IP
+✅ **Standard KNXnet/IP** - Implementation compliant with specifications
+✅ **Clear error messages** - Users know exactly what to do if discovery fails
+✅ **Well tested** - Includes unit tests and packet format validation
 
 ## Troubleshooting
 
-### Il gateway non viene trovato
+### Gateway not found
 
-1. Verifica che il gateway sia acceso e collegato alla rete
-2. Controlla che multicast sia abilitato sulla rete
-3. Aumenta il timeout da 3 a 5 secondi in `main.rs`:
+1. Verify the gateway is powered on and connected to the network
+2. Check that multicast is enabled on the network
+3. Increase the timeout from 3 to 5 seconds in the example:
    ```rust
    knx_discovery::discover_gateway(&stack, Duration::from_secs(5)).await
    ```
-4. Usa la configurazione statica come fallback (già implementato)
+4. Ensure your WiFi network allows multicast traffic
 
-### Voglio vedere i pacchetti raw
+### View raw packets
 
-Aggiungi logging in `knx_discovery.rs`:
+Add logging in `knx_discovery.rs`:
 ```rust
 info!("Sending SEARCH_REQUEST: {:02X?}", &request_buf[..request_len]);
 ```
 
-## Riferimenti
+## References
 
-- Specifiche KNXnet/IP Core v1.0 - Sezione 3.8.1 (SEARCH_REQUEST)
-- Specifiche KNXnet/IP Core v1.0 - Sezione 3.8.2 (SEARCH_RESPONSE)
-- Repository knx-search (Python reference implementation)
-
+- KNXnet/IP Core v1.0 Specifications - Section 3.8.1 (SEARCH_REQUEST)
+- KNXnet/IP Core v1.0 Specifications - Section 3.8.2 (SEARCH_RESPONSE)
+- knx-search repository (Python reference implementation)
