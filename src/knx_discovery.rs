@@ -63,7 +63,7 @@ const KNX_PORT: u16 = 3671;
 /// ```
 fn build_search_request(local_ip: [u8; 4], local_port: u16, buffer: &mut [u8]) -> usize {
     // Header
-    buffer[0] = 0x06;  // header_len (CRITICAL: questo era il byte mancante!)
+    buffer[0] = 0x06;  // header_len (CRITICAL: this was the missing byte!)
     buffer[1] = 0x10;  // protocol_version
     buffer[2] = 0x02;  // service_type high byte
     buffer[3] = 0x01;  // service_type low byte (SEARCH_REQUEST)

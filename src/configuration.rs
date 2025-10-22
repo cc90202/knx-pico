@@ -7,5 +7,5 @@
 pub const CONFIG: &str = r#"
 WIFI_NETWORK=Your_WiFi_SSID
 WIFI_PASSWORD=Your_WiFi_Password
-KNX_GATEWAY_IP=192.168.1.29
+KNX_GATEWAY_IP=192.168.1.10
 "#;
