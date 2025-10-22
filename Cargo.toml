@@ -10,16 +10,25 @@ homepage = "https://github.com/cc90202/knx-rs"
 readme = "README.md"
 keywords = ["knx", "knxnet-ip", "embedded", "no-std", "home-automation"]
 categories = ["embedded", "no-std", "network-programming"]
+exclude = [
+    "src/main.rs",
+    "src/knx_client.rs",
+    "src/knx_discovery.rs",
+    "src/configuration.rs",
+    "src/configuration.rs.example",
+    "examples/",
+    "build.rs",
+    "memory.x",
+    "knx_simulator.py",
+    "test_runner.py",
+    "check-all.sh",
+    ".github/",
+    ".claude/",
+]
 
 [lib]
 name = "knx_rs"
 path = "src/lib.rs"
-
-# Binary for RP2040 with Embassy
-# Note: Use --features embassy-rp or --features embassy-rp-usb when building
-[[bin]]
-name = "knx-rs"
-path = "src/main.rs"
 
 [dependencies]
 # Core library dependencies (no_std)
