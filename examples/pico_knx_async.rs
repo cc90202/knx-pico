@@ -7,13 +7,28 @@
 //!
 //! ## Hardware Requirements
 //! - Raspberry Pi Pico 2 W
-//! - KNX gateway on local network (e.g., at 192.168.1.10:3671)
+//! - KNX gateway on local network OR KNX simulator (see TESTING.md)
 //!
 //! ## Configuration
-//! Modify the constants below before compiling:
-//! - WIFI_SSID: Your WiFi network name
-//! - WIFI_PASSWORD: Your WiFi password
-//! - KNX_GATEWAY_IP: IP address of KNX gateway
+//! 1. Edit the constants below before compiling:
+//!    - `WIFI_SSID`: Your WiFi network name
+//!    - `WIFI_PASSWORD`: Your WiFi password
+//!    - `KNX_GATEWAY_IP`: IP address of KNX gateway or simulator
+//!
+//! ## Flash to Pico
+//!
+//! **With USB logger (recommended):**
+//! ```bash
+//! cargo flash-example-usb
+//! # Monitor: screen /dev/tty.usbmodem* 115200
+//! ```
+//!
+//! **With defmt logger (requires probe):**
+//! ```bash
+//! # Build and flash
+//! cargo build --release --example pico_knx_async --target thumbv8m.main-none-eabihf --features embassy-rp
+//! probe-rs run --chip RP2350 target/thumbv8m.main-none-eabihf/release/examples/pico_knx_async
+//! ```
 
 #![no_std]
 #![no_main]

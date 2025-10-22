@@ -1,9 +1,25 @@
 //! KNX Sniffer/Tester
 //!
-//! Interactive tool for testing KNX communication with simulator.
+//! Interactive tool for testing KNX communication with simulator or real KNX hardware.
 //! Performs gateway discovery, read and write operations.
 //!
-//! Run with: cargo run --example knx_sniffer --features usb-logger
+//! ## Hardware Required
+//! - Raspberry Pi Pico 2 W
+//! - KNX gateway on local network OR KNX simulator (see TESTING.md)
+//!
+//! ## Flash to Pico
+//!
+//! **With USB logger (recommended):**
+//! ```bash
+//! cargo flash-sniffer-usb-release
+//! # Monitor: screen /dev/tty.usbmodem* 115200
+//! ```
+//!
+//! **With defmt logger (requires probe):**
+//! ```bash
+//! cargo flash-sniffer-release
+//! # Logs visible via probe-rs
+//! ```
 
 #![no_std]
 #![no_main]
