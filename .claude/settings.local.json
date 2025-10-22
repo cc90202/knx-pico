@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check-example-usb:*)",
+      "Bash(RUSTDOCFLAGS=\"-D warnings -D missing_docs\" cargo doc:*)",
+      "Bash(cargo doc:*)",
+      "Bash(RUSTDOCFLAGS=\"-D warnings\" cargo doc:*)",
+      "Bash(cargo package:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
