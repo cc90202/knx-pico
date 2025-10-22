@@ -1,6 +1,6 @@
 [package]
 name = "knx-pico"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Cristiano Chieppa"]
@@ -13,11 +13,8 @@ categories = ["embedded", "no-std", "network-programming"]
 exclude = [
     "src/main.rs",
     "src/configuration.rs",
-    "src/configuration.rs.example",
-    "examples/",
     "build.rs",
     "memory.x",
-    "knx_simulator.py",
     "test_runner.py",
     "check-all.sh",
     ".github/",

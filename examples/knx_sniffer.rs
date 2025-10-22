@@ -28,8 +28,8 @@
 mod common;
 
 use common::utility::*;
-use common::knx_client::{KnxClient, KnxBuffers, KnxValue, DptType};
-use common::knx_discovery;
+use knx_pico::knx_client::{KnxClient, KnxBuffers, KnxValue, DptType};
+use knx_pico::knx_discovery;
 use cyw43::Control;
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::unwrap;
