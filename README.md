@@ -1,7 +1,7 @@
-# knx-rs
+# knx-pico
 
-[![Crates.io](https://img.shields.io/crates/v/knx-rs.svg)](https://crates.io/crates/knx-rs)
-[![Documentation](https://docs.rs/knx-rs/badge.svg)](https://docs.rs/knx-rs)
+[![Crates.io](https://img.shields.io/crates/v/knx-pico.svg)](https://crates.io/crates/knx-pico)
+[![Documentation](https://docs.rs/knx-pico/badge.svg)](https://docs.rs/knx-pico)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](README.md#license)
 
 A `no_std` KNXnet/IP protocol implementation for embedded systems, designed for the Embassy async runtime.
@@ -25,46 +25,31 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-knx-rs = { version = "0.1", features = ["embassy-rp"] }
+knx-pico = "0.1"
 ```
 
 ### Basic Example
 
 ```rust
-use knx_rs::{KnxClient, GroupAddress, KnxValue, ga};
-use embassy_time::Duration;
+use knx_pico::{GroupAddress, protocol::cemi::CemiFrame, dpt::{Dpt1, DptEncode}};
 
-// Discover gateway automatically
-let gateway = knx_rs::knx_discovery::discover_gateway(&stack, Duration::from_secs(3))
-    .await
-    .expect("No KNX gateway found");
+// Create a group address
+let light = GroupAddress::new(1, 2, 3)?;
 
-// Create and connect client
-let mut client = KnxClient::builder()
-    .gateway(gateway.ip, gateway.port)
-    .device_address([1, 1, 1])
-    .build_with_buffers(&stack, &mut buffers)?;
+// Encode a boolean value (DPT 1 - Switch)
+let value = Dpt1::new(true);
+let encoded = value.encode();
 
-client.connect().await?;
+// Create a write request frame
+let frame = CemiFrame::write_request(light.into(), &encoded)?;
 
-// Control devices using the `ga!` macro and high-level API
-let light = ga!(1/2/3);
-client.write(light, KnxValue::Bool(true)).await?;  // Turn on
-client.write(light, KnxValue::Bool(false)).await?; // Turn off
-
-// Read values from sensors
-client.read(ga!(1/2/10)).await?;
-match client.receive_event().await? {
-    Some(KnxEvent::GroupResponse { address, value }) => {
-        println!("Temperature at {}: {:?}", address, value);
-    }
-    _ => {}
-}
+// The frame can now be sent over KNXnet/IP tunnel
+// (requires Embassy runtime and network stack - see examples on GitHub)
 ```
 
-See [`examples/`](examples/) for complete working examples including:
-- **`pico_knx_async.rs`** - Low-level AsyncTunnelClient with manual frame construction
-- **`knx_sniffer.rs`** - High-level KnxClient demonstrating convenience macros
+For complete examples with Embassy runtime and Raspberry Pi Pico 2 W, see the [examples directory on GitHub](https://github.com/cc90202/knx-pico/tree/master/examples):
+- **`pico_knx_async.rs`** - Complete working example for Pico 2 W
+- **`knx_sniffer.rs`** - Interactive testing tool with convenience macros
 
 ## Hardware Support
 
