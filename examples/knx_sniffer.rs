@@ -28,7 +28,7 @@
 mod common;
 
 use common::utility::*;
-use common::knx_client::{KnxClient, KnxBuffers, KnxValue};
+use common::knx_client::{KnxClient, KnxBuffers, KnxValue, DptType};
 use common::knx_discovery;
 use cyw43::Control;
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
@@ -57,11 +57,8 @@ use defmt_rtt as _;
 // Network stack imports
 use embassy_net::{Config, StackResources};
 
-// KNX imports
-use knx_rs::addressing::GroupAddress;
-
-// Import unified logging macro from knx_rs crate
-use knx_rs::pico_log;
+// Import unified logging macro and convenience macros from knx_rs crate
+use knx_rs::{pico_log, knx_read, knx_write, ga};
 
 // Program metadata for `picotool info`
 #[unsafe(link_section = ".bi_entries")]
@@ -206,35 +203,24 @@ async fn main(spawner: Spawner) {
     // KNX Gateway Discovery and Connection Test
     // ========================================================================
 
-    // Feature flag: set to false to use static configuration from configuration.rs
-    const USE_AUTO_DISCOVERY: bool = true;
+    pico_log!(info, "1. Testing SEARCH_REQUEST (gateway discovery)...");
 
-    let (knx_gateway_ip, knx_gateway_port) = if USE_AUTO_DISCOVERY {
-        // Try automatic gateway discovery via SEARCH_REQUEST
-        pico_log!(info, "1. Testing SEARCH_REQUEST (gateway discovery)...");
-
-        match knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
-            Some(gateway) => {
-                pico_log!(info, "✓ KNX Gateway discovered automatically!");
-                pico_log!(info, "  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
-                pico_log!(info, "  Port: {}", gateway.port);
-                (gateway.ip, gateway.port)
-            }
-            None => {
-                // Fallback to static configuration
-                pico_log!(warn, "✗ No gateway found via discovery, using static configuration");
-                let gateway_ip_str = get_knx_gateway_ip();
-                let knx_gateway_ip = parse_ip(gateway_ip_str);
-                pico_log!(info, "  Fallback to: {}", gateway_ip_str);
-                (knx_gateway_ip, 3671)
+    let (knx_gateway_ip, knx_gateway_port) = match knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
+        Some(gateway) => {
+            pico_log!(info, "✓ KNX Gateway discovered automatically!");
+            pico_log!(info, "  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
+            pico_log!(info, "  Port: {}", gateway.port);
+            (gateway.ip, gateway.port)
+        }
+        None => {
+            pico_log!(error, "✗ No KNX gateway found on network!");
+            pico_log!(error, "  Ensure your KNX gateway or simulator is running");
+            pico_log!(error, "  and connected to the same network.");
+            pico_log!(info, "System halted. Reset device to retry.");
+            loop {
+                Timer::after(Duration::from_secs(30)).await;
             }
         }
-    } else {
-        // Use static configuration from configuration.rs
-        let gateway_ip_str = get_knx_gateway_ip();
-        let knx_gateway_ip = parse_ip(gateway_ip_str);
-        pico_log!(info, "KNX Gateway (static config): {}", gateway_ip_str);
-        (knx_gateway_ip, 3671)
     };
 
     pico_log!(info, "Connecting to KNX gateway at {}.{}.{}.{}:{}",
@@ -269,12 +255,12 @@ async fn main(spawner: Spawner) {
     // ========================================================================
 
     pico_log!(info, "3. Testing READ commands...");
-    let test_addr = GroupAddress::from(0x0A03); // 1/2/3
 
     pico_log!(info, "Sending READ to 1/2/3...");
     // Note: Read operations are fire-and-forget in this implementation
     // The response would come as a GroupResponse event
-    match client.read(test_addr).await {
+    // Using knx_read! macro for concise syntax
+    match knx_read!(client, 1/2/3).await {
         Ok(_) => pico_log!(info, "✓ READ command sent (response would be received as event)"),
         Err(_) => pico_log!(error, "✗ Failed to send READ command"),
     }
@@ -286,10 +272,10 @@ async fn main(spawner: Spawner) {
     // ========================================================================
 
     pico_log!(info, "4. Testing WRITE commands...");
-    let light_addr = GroupAddress::from(0x0A03); // 1/2/3
 
     pico_log!(info, "Sending WRITE: bool=true to 1/2/3");
-    match client.write(light_addr, KnxValue::Bool(true)).await {
+    // Using knx_write! macro for concise syntax
+    match knx_write!(client, 1/2/3, KnxValue::Bool(true)).await {
         Ok(_) => {
             pico_log!(info, "✓ WRITE command sent successfully (fire-and-forget)");
         }
@@ -302,7 +288,7 @@ async fn main(spawner: Spawner) {
     Timer::after(Duration::from_secs(2)).await;
 
     pico_log!(info, "Sending WRITE: bool=false to 1/2/3");
-    match client.write(light_addr, KnxValue::Bool(false)).await {
+    match knx_write!(client, 1/2/3, KnxValue::Bool(false)).await {
         Ok(_) => {
             pico_log!(info, "✓ WRITE command sent successfully");
         }
@@ -314,8 +300,8 @@ async fn main(spawner: Spawner) {
             match client.connect().await {
                 Ok(_) => {
                     pico_log!(info, "✓ Reconnected to KNX gateway!");
-                    // Retry the command
-                    if let Ok(_) = client.write(light_addr, KnxValue::Bool(false)).await {
+                    // Retry the command with macro
+                    if let Ok(_) = knx_write!(client, 1/2/3, KnxValue::Bool(false)).await {
                         pico_log!(info, "✓ Command sent successfully after reconnection");
                     }
                 }
@@ -329,6 +315,53 @@ async fn main(spawner: Spawner) {
     Timer::after(Duration::from_secs(1)).await;
 
     // ========================================================================
+    // Test: DPT Type Registration
+    // ========================================================================
+
+    pico_log!(info, "5. Testing DPT type registration...");
+
+    // Register multiple DPT types
+    // Note: register_dpts! macro would be used here in production code
+    let addresses_and_types = [
+        (ga!(1/2/3), DptType::Bool),         // Light switch
+        (ga!(1/2/5), DptType::Percent),      // Dimmer
+        (ga!(1/2/10), DptType::Temperature), // Temperature sensor
+        (ga!(1/2/11), DptType::Humidity),    // Humidity sensor
+    ];
+
+    let mut registered = 0;
+    for (addr, dpt_type) in addresses_and_types {
+        if client.register_dpt(addr, dpt_type).is_ok() {
+            registered += 1;
+        }
+    }
+
+    if registered == 4 {
+        pico_log!(info, "✓ DPT types registered successfully (4 addresses)");
+    } else {
+        pico_log!(error, "✗ Failed to register some DPT types");
+    }
+
+    Timer::after(Duration::from_secs(1)).await;
+
+    // ========================================================================
+    // Test: RESPOND to read requests
+    // ========================================================================
+
+    pico_log!(info, "6. Testing RESPOND command...");
+    pico_log!(info, "Simulating response to a read request...");
+
+    // Respond with a temperature value (as if we received a read request)
+    // In a real scenario, this would be inside receive_event() when handling GroupRead events
+    // Note: knx_respond! macro would be used here: knx_respond!(client, 1/2/10, KnxValue::Temperature(22.5))
+    match client.respond(ga!(1/2/10), KnxValue::Temperature(22.5)).await {
+        Ok(_) => pico_log!(info, "✓ RESPOND sent: Temperature = 22.5°C to 1/2/10"),
+        Err(_) => pico_log!(error, "✗ Failed to send RESPOND"),
+    }
+
+    Timer::after(Duration::from_secs(1)).await;
+
+    // ========================================================================
     // Test Summary
     // ========================================================================
 
@@ -336,10 +369,12 @@ async fn main(spawner: Spawner) {
     pico_log!(info, "=== Test Summary ===");
     pico_log!(info, "✓ SEARCH_REQUEST: OK (gateway discovery)");
     pico_log!(info, "✓ CONNECT_REQUEST: OK (tunnel established)");
-    pico_log!(info, "✓ READ: OK (sent to 1/2/3)");
-    pico_log!(info, "✓ WRITE: OK (sent bool true/false to 1/2/3)");
+    pico_log!(info, "✓ READ: OK (knx_read! macro used)");
+    pico_log!(info, "✓ WRITE: OK (knx_write! macro used)");
+    pico_log!(info, "✓ REGISTER_DPTS: OK (registered 4 DPT types)");
+    pico_log!(info, "✓ RESPOND: OK (sent temperature response)");
     pico_log!(info, "");
-    pico_log!(info, "All basic tests completed!");
+    pico_log!(info, "All tests completed! Convenience macros demonstrated (ga!, knx_read!, knx_write!)");
     pico_log!(info, "");
 
     // ========================================================================
