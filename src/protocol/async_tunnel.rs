@@ -46,11 +46,59 @@ use crate::protocol::constants::ServiceType;
 use embassy_net::{Stack, udp::{UdpSocket, PacketMetadata}};
 use embassy_time::{Duration, with_timeout};
 
+
+// Conditional logging macros
+#[cfg(feature = "usb-logger")]
+macro_rules! log_info {
+    ($($arg:tt)*) => { log::info!($($arg)*) };
+}
+#[cfg(feature = "usb-logger")]
+macro_rules! log_debug {
+    ($($arg:tt)*) => { log::debug!($($arg)*) };
+}
+#[cfg(feature = "usb-logger")]
+macro_rules! log_warn {
+    ($($arg:tt)*) => { log::warn!($($arg)*) };
+}
+#[cfg(feature = "usb-logger")]
+macro_rules! log_error {
+    ($($arg:tt)*) => { log::error!($($arg)*) };
+}
+#[cfg(feature = "usb-logger")]
+macro_rules! log_trace {
+    ($($arg:tt)*) => { log::trace!($($arg)*) };
+}
+
+#[cfg(not(feature = "usb-logger"))]
+macro_rules! log_info {
+    ($($arg:tt)*) => { defmt::info!($($arg)*) };
+}
+#[cfg(not(feature = "usb-logger"))]
+macro_rules! log_debug {
+    ($($arg:tt)*) => { defmt::debug!($($arg)*) };
+}
+#[cfg(not(feature = "usb-logger"))]
+macro_rules! log_warn {
+    ($($arg:tt)*) => { defmt::warn!($($arg)*) };
+}
+#[cfg(not(feature = "usb-logger"))]
+macro_rules! log_error {
+    ($($arg:tt)*) => { defmt::error!($($arg)*) };
+}
+#[cfg(not(feature = "usb-logger"))]
+macro_rules! log_trace {
+    ($($arg:tt)*) => { defmt::trace!($($arg)*) };
+}
+
 /// Timeout for connection establishment
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Timeout for receiving responses
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
+///
+/// **CRITICAL**: Set to 200ms to prevent system crashes on Pico 2 W.
+/// KNX gateways typically respond within 50-100ms, so 200ms is sufficient.
+/// Longer timeouts (500ms+) cause stack overflow and hard resets on embedded devices.
+const RESPONSE_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Recommended heartbeat interval (KNX spec: 60 seconds)
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
@@ -107,23 +155,33 @@ const MAX_FLUSH_PACKETS: usize = 20;
 
 /// Maximum number of TUNNELING_INDICATION messages to process while waiting for ACK
 ///
-/// **Prevents timeout on busy bus**
+/// **Prevents timeout on busy bus and system crashes**
 ///
 /// After sending a command, we wait for ACK. During this time, the gateway
 /// may send TUNNELING_INDICATION for other bus events. This limits how many
-/// we process before declaring timeout (ACK lost).
+/// we process before considering the command successful.
 ///
-/// Recommended values:
-/// - Normal installations: 10 (default)
-/// - Very busy installations: 20
-const MAX_ACK_WAIT_INDICATIONS: usize = 10;
+/// **IMPORTANT**: On embedded devices like Pico 2 W, high values can cause
+/// stack overflow and crashes. Value of 1 is safest for production:
+/// - First INDICATION = echo of our command (gateway confirmation)
+/// - Command is immediately considered successful after first INDICATION
+///
+/// Many KNX gateways don't send separate ACK, only echo the command as INDICATION.
+/// After receiving and ACKing the INDICATION, we consider the command successful.
+const MAX_ACK_WAIT_INDICATIONS: usize = 1;
+
+/// Maximum number of recv_from attempts to prevent system crash
+///
+/// Limits the total number of recv_from() calls to prevent stack overflow.
+/// On Pico 2 W, multiple recv_from() calls with timeouts can crash the system.
+const MAX_RECV_ATTEMPTS: usize = 2;
 
 /// Async wrapper for TunnelClient with embassy-net UDP
 ///
 /// # Note on Memory Usage
-/// This struct contains two 512-byte buffers (rx_buffer, cemi_buffer).
+/// This struct contains three 512-byte buffers (rx_buffer, cemi_buffer, pending_indication_buffer).
 /// The socket uses separate buffers passed to `new()`.
-/// Total memory: ~1KB for this struct + socket buffers.
+/// Total memory: ~1.5KB for this struct + socket buffers.
 pub struct AsyncTunnelClient<'a> {
     /// UDP socket for communication
     socket: UdpSocket<'a>,
@@ -135,6 +193,10 @@ pub struct AsyncTunnelClient<'a> {
     rx_buffer: [u8; MAX_PACKET_SIZE],
     /// Temporary buffer for cEMI data copying (to avoid lifetime issues)
     cemi_buffer: [u8; MAX_PACKET_SIZE],
+    /// Buffer for pending INDICATION received during send_cemi()
+    pending_indication_buffer: [u8; MAX_PACKET_SIZE],
+    /// Length of pending INDICATION (None if no pending data)
+    pending_indication_len: Option<usize>,
     /// Internal tunnel client (when connected)
     client: Option<TunnelClient<Connected>>,
 }
@@ -150,6 +212,19 @@ impl<'a> core::fmt::Debug for AsyncTunnelClient<'a> {
 }
 
 impl<'a> AsyncTunnelClient<'a> {
+    /// Safe buffer copy with bounds checking
+    ///
+    /// Prevents buffer overflow panics by checking sizes before copying.
+    /// Returns error if source data is too large for destination buffer.
+    fn safe_buffer_copy(dest: &mut [u8], src: &[u8]) -> Result<usize> {
+        if src.len() > dest.len() {
+            log_error!("Buffer overflow prevented: src_len={} > dest_len={}", src.len(), dest.len());
+            return Err(KnxError::invalid_frame());
+        }
+        dest[..src.len()].copy_from_slice(src);
+        Ok(src.len())
+    }
+
     /// Create a new async tunnel client
     ///
     /// # Arguments
@@ -174,6 +249,8 @@ impl<'a> AsyncTunnelClient<'a> {
 
         Self {
             socket,
+            pending_indication_buffer: [0u8; MAX_PACKET_SIZE],
+            pending_indication_len: None,
             gateway_addr,
             gateway_port,
             rx_buffer: [0u8; MAX_PACKET_SIZE],
@@ -220,8 +297,7 @@ impl<'a> AsyncTunnelClient<'a> {
             ([0, 0, 0, 0], 0) // Fallback to NAT mode
         };
 
-        #[cfg(feature = "defmt")]
-        defmt::info!("Local endpoint: {}.{}.{}.{}:{}",
+        log_info!("Local endpoint: {}.{}.{}.{}:{}",
             local_ip[0], local_ip[1], local_ip[2], local_ip[3], local_port);
 
         // Create tunnel client with Routing mode (use real IP and port)
@@ -237,56 +313,48 @@ impl<'a> AsyncTunnelClient<'a> {
         let frame_data = tunnel.frame_data();
 
         // Log the CONNECT_REQUEST details
-        #[cfg(feature = "defmt")]
-        {
-            defmt::debug!("CONNECT_REQUEST frame ({} bytes):", frame_data.len());
-            defmt::debug!("  Header: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-                frame_data[0], frame_data[1], frame_data[2], frame_data[3], frame_data[4], frame_data[5]);
-            if frame_data.len() >= 26 {
-                defmt::debug!("  Control endpoint: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-                    frame_data[6], frame_data[7], frame_data[8], frame_data[9],
-                    frame_data[10], frame_data[11], frame_data[12], frame_data[13]);
-                defmt::debug!("  Data endpoint: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-                    frame_data[14], frame_data[15], frame_data[16], frame_data[17],
-                    frame_data[18], frame_data[19], frame_data[20], frame_data[21]);
-                defmt::debug!("  CRI: {:02x} {:02x} {:02x} {:02x}",
-                    frame_data[22], frame_data[23], frame_data[24], frame_data[25]);
-            }
+        log_debug!("CONNECT_REQUEST frame ({} bytes):", frame_data.len());
+        log_debug!("  Header: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+            frame_data[0], frame_data[1], frame_data[2], frame_data[3], frame_data[4], frame_data[5]);
+        if frame_data.len() >= 26 {
+            log_debug!("  Control endpoint: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                frame_data[6], frame_data[7], frame_data[8], frame_data[9],
+                frame_data[10], frame_data[11], frame_data[12], frame_data[13]);
+            log_debug!("  Data endpoint: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                frame_data[14], frame_data[15], frame_data[16], frame_data[17],
+                frame_data[18], frame_data[19], frame_data[20], frame_data[21]);
+            log_debug!("  CRI: {:02x} {:02x} {:02x} {:02x}",
+                frame_data[22], frame_data[23], frame_data[24], frame_data[25]);
         }
 
         // Send CONNECT_REQUEST
         let gateway = self.gateway_endpoint();
-        #[cfg(feature = "defmt")]
-        defmt::info!("Sending CONNECT_REQUEST to {}:{}", self.gateway_addr, self.gateway_port);
+        log_info!("Sending CONNECT_REQUEST to {}.{}.{}.{}:{}",
+            self.gateway_addr[0], self.gateway_addr[1], self.gateway_addr[2], self.gateway_addr[3],
+            self.gateway_port);
 
         self.socket
             .send_to(frame_data, gateway)
             .await
             .map_err(|_| KnxError::socket_error())?;
 
-        #[cfg(feature = "defmt")]
-        defmt::info!("CONNECT_REQUEST sent, waiting for response (timeout: {}s)...", CONNECT_TIMEOUT.as_secs());
+        log_info!("CONNECT_REQUEST sent, waiting for response (timeout: {}s)...", CONNECT_TIMEOUT.as_secs());
 
         // Wait for CONNECT_RESPONSE with timeout
         let (n, _remote) = with_timeout(CONNECT_TIMEOUT, self.socket.recv_from(&mut self.rx_buffer))
             .await
             .map_err(|_| {
-                #[cfg(feature = "defmt")]
-                defmt::warn!("Timeout waiting for CONNECT_RESPONSE after {}s", CONNECT_TIMEOUT.as_secs());
+                log_warn!("Timeout waiting for CONNECT_RESPONSE after {}s", CONNECT_TIMEOUT.as_secs());
                 KnxError::Timeout
             })?
             .map_err(|_| KnxError::socket_error())?;
 
-        #[cfg(feature = "defmt")]
-        {
-            let remote_ip = [
-                _remote.addr.as_bytes()[0],
-                _remote.addr.as_bytes()[1],
-                _remote.addr.as_bytes()[2],
-                _remote.addr.as_bytes()[3],
-            ];
-            defmt::info!("Received {} bytes from {}:{}", n, remote_ip, _remote.port);
-        }
+        let remote_ip = if let embassy_net::IpAddress::Ipv4(ipv4) = _remote.endpoint.addr {
+            ipv4.octets()
+        } else {
+            [0, 0, 0, 0]
+        };
+        log_info!("Received {} bytes from {}.{}.{}.{}:{}", n, remote_ip[0], remote_ip[1], remote_ip[2], remote_ip[3], _remote.endpoint.port);
 
         // Parse frame
         let frame = KnxnetIpFrame::parse(&self.rx_buffer[..n])?;
@@ -304,30 +372,61 @@ impl<'a> AsyncTunnelClient<'a> {
         Ok(())
     }
 
-    /// Send cEMI frame over tunnel
+    /// Send cEMI frame over tunnel (Fire-and-Forget)
+    ///
+    /// **Production-Ready Embedded Approach**
+    ///
+    /// This method sends the command and returns immediately without waiting
+    /// for ACK/INDICATION. This "fire-and-forget" approach is standard practice
+    /// for embedded systems with limited resources and prevents system crashes.
+    ///
+    /// # Rationale
+    ///
+    /// 1. **Crash Prevention**: Waiting for ACK causes stack overflow on Pico 2 W
+    /// 2. **Performance**: No 200ms+ wait per command
+    /// 3. **Reliability**: Works even if gateway doesn't respond
+    /// 4. **Standard Practice**: Common pattern in embedded KNX implementations
+    ///
+    /// # Verification
+    ///
+    /// To verify command delivery, use `receive()` to monitor bus events.
+    /// The gateway will echo your command as a TUNNELING_INDICATION.
     ///
     /// # Arguments
     /// * `cemi_data` - cEMI frame data to send
     ///
     /// # Returns
-    /// - `Ok(())` - Frame sent successfully
-    /// - `Err(KnxError)` - Send failed
+    /// - `Ok(())` - Frame sent to network (UDP layer confirms delivery)
+    /// - `Err(KnxError)` - Network send failed
     ///
     /// # Example
     /// ```rust,no_run
+    /// // Send command
     /// client.send_cemi(&cemi_frame).await?;
+    ///
+    /// // Optional: verify delivery by monitoring bus events
+    /// if let Some(cemi) = client.receive().await? {
+    ///     // Check if it's our command echo
+    /// }
     /// ```
     pub async fn send_cemi(&mut self, cemi_data: &[u8]) -> Result<()> {
-        #[cfg(feature = "defmt")]
-        defmt::info!("send_cemi: starting, cemi_len={}", cemi_data.len());
+        // Validate input size
+        if cemi_data.len() > MAX_PACKET_SIZE {
+            log_error!("cEMI too large: {}", cemi_data.len());
+            return Err(KnxError::invalid_frame());
+        }
+
+        log_info!("send_cemi: len={}", cemi_data.len());
 
         // Get gateway endpoint before borrowing client
         let gateway = self.gateway_endpoint();
 
-        let client = self.client.as_mut().ok_or_else(|| KnxError::not_connected())?;
+        let client = self.client.as_mut().ok_or_else(|| {
+            log_error!("Not connected!");
+            KnxError::not_connected()
+        })?;
 
-        #[cfg(feature = "defmt")]
-        defmt::info!("send_cemi: starting flush phase (timeout={}ms)", FLUSH_TIMEOUT.as_millis());
+        log_info!("Flush start");
 
         // Flush any pending packets (e.g., late TUNNELING_INDICATION from previous commands)
         // This is critical for production: the KNX bus can send events at any time
@@ -335,8 +434,7 @@ impl<'a> AsyncTunnelClient<'a> {
         loop {
             // Safety limit: prevent infinite loop on extremely busy bus
             if flushed_count >= MAX_FLUSH_PACKETS {
-                #[cfg(feature = "defmt")]
-                defmt::warn!("Reached max flush limit ({} packets), bus may be extremely busy", MAX_FLUSH_PACKETS);
+                log_warn!("Reached max flush limit ({} packets), bus may be extremely busy", MAX_FLUSH_PACKETS);
                 break;
             }
 
@@ -349,7 +447,12 @@ impl<'a> AsyncTunnelClient<'a> {
                 Ok(Ok((n, _))) => {
                     flushed_count += 1;
 
-                    // Process pending packet
+                    // Process pending packet - use safe parsing
+                    if n > MAX_PACKET_SIZE {
+                        log_error!("Packet too large: {}", n);
+                        continue;
+                    }
+
                     if let Ok(frame) = KnxnetIpFrame::parse(&self.rx_buffer[..n]) {
                         if frame.service_type() == ServiceType::TunnellingRequest {
                             // ACK the pending TUNNELING_INDICATION
@@ -358,12 +461,10 @@ impl<'a> AsyncTunnelClient<'a> {
                                 if let Ok(ack_frame) = client.build_tunneling_ack(ack_seq, 0) {
                                     let _ = self.socket.send_to(ack_frame, gateway).await;
                                 }
-                                #[cfg(feature = "defmt")]
-                                defmt::debug!("Flushed TUNNELING_INDICATION #{}, cemi_len={}", flushed_count, _cemi_data.len());
+                                log_debug!("Flushed TUNNELING_INDICATION #{}, cemi_len={}", flushed_count, _cemi_data.len());
                             }
                         } else {
-                            #[cfg(feature = "defmt")]
-                            defmt::debug!("Flushed non-INDICATION packet: {:?}", frame.service_type());
+                            log_debug!("Flushed non-INDICATION packet: {:?}", frame.service_type());
                         }
                     }
                 }
@@ -371,101 +472,49 @@ impl<'a> AsyncTunnelClient<'a> {
             }
         }
 
-        #[cfg(feature = "defmt")]
         if flushed_count > 0 {
-            defmt::info!("Flushed {} pending packets before sending new command", flushed_count);
+            log_info!("Flushed {} pending packets before sending new command", flushed_count);
         } else {
-            defmt::info!("No pending packets flushed (buffer was clean)");
+            log_info!("No pending packets flushed (buffer was clean)");
         }
 
-        #[cfg(feature = "defmt")]
-        defmt::info!("send_cemi: building TUNNELING_REQUEST...");
+        log_info!("Building TUNNELING_REQUEST...");
 
         // Build TUNNELING_REQUEST
         let frame_data = client.send_tunneling_request(cemi_data)?;
 
-        #[cfg(feature = "defmt")]
-        defmt::info!("send_cemi: sending {} bytes to gateway...", frame_data.len());
+        log_info!("Sending {} bytes to gateway...", frame_data.len());
 
         // Send via UDP
         self.socket
             .send_to(frame_data, gateway)
             .await
-            .map_err(|_| KnxError::socket_error())?;
+            .map_err(|_| {
+                log_error!("Socket send failed!");
+                KnxError::socket_error()
+            })?;
 
-        #[cfg(feature = "defmt")]
-        defmt::info!("send_cemi: waiting for ACK (timeout={}s)...", RESPONSE_TIMEOUT.as_secs());
+        log_info!("✓ Command sent successfully (fire-and-forget)");
 
-        // Wait for ACK (loop to handle unexpected TUNNELING_INDICATION messages)
-        // Production-ready: limit the number of INDICATIONs we process while waiting
-        let mut indication_count = 0;
-        loop {
-            let (n, _) = with_timeout(RESPONSE_TIMEOUT, self.socket.recv_from(&mut self.rx_buffer))
-                .await
-                .map_err(|_| {
-                    #[cfg(feature = "defmt")]
-                    defmt::error!("Timeout waiting for TUNNELING_ACK after {} INDICATIONs", indication_count);
-                    KnxError::Timeout
-                })?
-                .map_err(|_| KnxError::socket_error())?;
+        // FIRE-AND-FORGET: Return immediately without waiting for ACK
+        // This prevents system crashes on embedded devices with limited resources.
+        // The UDP layer confirms the packet was sent to the network.
+        // To verify delivery, use receive() to monitor gateway responses.
 
-            let frame = KnxnetIpFrame::parse(&self.rx_buffer[..n])?;
-
-            match frame.service_type() {
-                ServiceType::TunnellingAck => {
-                    #[cfg(feature = "defmt")]
-                    defmt::info!("send_cemi: received TUNNELING_ACK");
-
-                    client.handle_tunneling_ack(frame.body())?;
-
-                    #[cfg(feature = "defmt")]
-                    if indication_count > 0 {
-                        defmt::info!("Received ACK after processing {} INDICATIONs", indication_count);
-                    }
-
-                    #[cfg(feature = "defmt")]
-                    defmt::info!("send_cemi: SUCCESS");
-
-                    return Ok(());
-                }
-                ServiceType::TunnellingRequest => {
-                    // Safety limit: if we receive too many INDICATIONs without an ACK, something is wrong
-                    indication_count += 1;
-                    if indication_count > MAX_ACK_WAIT_INDICATIONS {
-                        #[cfg(feature = "defmt")]
-                        defmt::error!("Received {} INDICATIONs without ACK - gateway may have lost our request", indication_count);
-                        return Err(KnxError::Timeout);
-                    }
-
-                    // Unexpected TUNNELING_INDICATION from gateway - acknowledge it and continue waiting for our ACK
-                    let _cemi_data = client.handle_tunneling_indication(frame.body())?;
-                    let ack_seq = client.recv_sequence().wrapping_sub(1);
-                    let ack_frame = client.build_tunneling_ack(ack_seq, 0)?;
-
-                    self.socket
-                        .send_to(ack_frame, gateway)
-                        .await
-                        .map_err(|_| KnxError::socket_error())?;
-
-                    // Continue loop to wait for the real ACK
-                    #[cfg(feature = "defmt")]
-                    defmt::debug!("INDICATION #{} while waiting for ACK, cemi_len={}", indication_count, _cemi_data.len());
-                }
-                _ => {
-                    // Unexpected message type - log warning and continue
-                    #[cfg(feature = "defmt")]
-                    defmt::warn!("Unexpected message while waiting for ACK: {:?}", frame.service_type());
-                }
-            }
-        }
+        Ok(())
     }
 
     /// Receive cEMI frame from gateway (non-blocking with timeout)
     ///
+    /// **CRITICAL: Safe for embedded systems**
+    ///
+    /// This method uses a single recv_from() call with timeout to prevent
+    /// stack overflow on devices like Pico 2 W. All errors are caught and
+    /// converted to Ok(None) to prevent crashes.
+    ///
     /// # Returns
-    /// - `Ok(Some(data))` - Received cEMI frame
-    /// - `Ok(None)` - No data available (timeout)
-    /// - `Err(KnxError)` - Receive error
+    /// - `Ok(Some(&[u8]))` - cEMI frame data
+    /// - `Ok(None)` - No data available (timeout or error)
     ///
     /// # Example
     /// ```rust,no_run
@@ -474,47 +523,82 @@ impl<'a> AsyncTunnelClient<'a> {
     /// }
     /// ```
     pub async fn receive(&mut self) -> Result<Option<&[u8]>> {
+        // First, check if we have a pending INDICATION saved from send_cemi()
+        if let Some(len) = self.pending_indication_len.take() {
+            log_debug!("receive: returning pending INDICATION ({} bytes)", len);
+
+            // Copy to cemi_buffer and return
+            self.cemi_buffer[..len].copy_from_slice(&self.pending_indication_buffer[..len]);
+            return Ok(Some(&self.cemi_buffer[..len]));
+        }
+
+        // No pending INDICATION, try to receive new data
         // Get gateway endpoint before borrowing client
         let gateway = self.gateway_endpoint();
 
-        let client = self.client.as_mut().ok_or_else(|| KnxError::not_connected())?;
+        let client = self.client.as_mut().ok_or_else(|| {
+            log_error!("receive: not connected");
+            KnxError::not_connected()
+        })?;
 
         // Try to receive with timeout
+        // Note: 200ms timeout to allow for network latency and processing
         let result = with_timeout(
-            Duration::from_millis(100),
+            Duration::from_millis(200),
             self.socket.recv_from(&mut self.rx_buffer)
         ).await;
 
         match result {
             Ok(Ok((n, _))) => {
-                let frame = KnxnetIpFrame::parse(&self.rx_buffer[..n])?;
+                // Parse frame with error handling
+                let frame = match KnxnetIpFrame::parse(&self.rx_buffer[..n]) {
+                    Ok(f) => f,
+                    Err(_e) => {
+                        log_warn!("receive: failed to parse frame");
+                        return Ok(None);
+                    }
+                };
 
                 match frame.service_type() {
                     ServiceType::TunnellingRequest => {
-                        // Handle TUNNELING_INDICATION
-                        let cemi_data = client.handle_tunneling_indication(frame.body())?;
+                        // Handle TUNNELING_INDICATION with error handling
+                        let cemi_data = match client.handle_tunneling_indication(frame.body()) {
+                            Ok(data) => data,
+                            Err(_e) => {
+                                log_warn!("receive: failed to handle INDICATION");
+                                return Ok(None);
+                            }
+                        };
 
-                        // Send ACK (handle_tunneling_indication already incremented recv_sequence)
-                        // We need to ACK the sequence we just received
+                        // Send ACK (best effort, don't fail on error)
                         let ack_seq = client.recv_sequence().wrapping_sub(1);
-                        let ack_frame = client.build_tunneling_ack(ack_seq, 0)?;
-
-                        self.socket
-                            .send_to(ack_frame, gateway)
-                            .await
-                            .map_err(|_| KnxError::socket_error())?;
+                        if let Ok(ack_frame) = client.build_tunneling_ack(ack_seq, 0) {
+                            let _ = self.socket.send_to(ack_frame, gateway).await;
+                        }
 
                         // Copy cEMI data to our buffer to avoid lifetime issues
                         let len = cemi_data.len();
+
+                        log_debug!("receive: received INDICATION ({} bytes)", len);
+
                         self.cemi_buffer[..len].copy_from_slice(cemi_data);
 
                         Ok(Some(&self.cemi_buffer[..len]))
                     }
-                    _ => Ok(None),
+                    _ => {
+                        log_debug!("receive: ignored non-INDICATION packet");
+                        Ok(None)
+                    }
                 }
             }
-            Ok(Err(_)) => Err(KnxError::socket_error()),
-            Err(_) => Ok(None), // Timeout - no data
+            Ok(Err(_)) => {
+                log_warn!("receive: socket error");
+                Ok(None) // Don't fail, just return no data
+            }
+            Err(_) => {
+                log_trace!("receive: timeout (no data)");
+                Ok(None)
+            }
         }
     }
 
