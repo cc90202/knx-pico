@@ -34,7 +34,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::protocol::cemi::{CEMIFrame, LDataFrame};
+//! use knx_pico::protocol::cemi::{CEMIFrame, LDataFrame};
 //!
 //! // Parse a complete cEMI frame
 //! let cemi = CEMIFrame::parse(&frame_data)?;

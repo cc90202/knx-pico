@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple KNXnet/IP Gateway Simulator for testing knx-rs
+Simple KNXnet/IP Gateway Simulator for testing knx-pico
 
 This simulates a basic KNXnet/IP gateway that responds to:
 - CONNECT_REQUEST/RESPONSE

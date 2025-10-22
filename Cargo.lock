@@ -944,8 +944,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "knx-rs"
-version = "0.1.0"
+name = "knx-pico"
+version = "0.1.2"
 dependencies = [
  "cortex-m-rt",
  "critical-section",

@@ -59,12 +59,12 @@ use embassy_rp::peripherals::USB;
 #[cfg(feature = "usb-logger")]
 use embassy_rp::usb::{Driver, InterruptHandler as UsbInterruptHandler};
 
-use knx_rs::addressing::GroupAddress;
-use knx_rs::protocol::async_tunnel::AsyncTunnelClient;
-use knx_rs::protocol::cemi::{ControlField1, ControlField2, Apci};
-use knx_rs::protocol::constants::CEMIMessageCode;
-use knx_rs::addressing::IndividualAddress;
-use knx_rs::{pico_log, ga};
+use knx_pico::addressing::GroupAddress;
+use knx_pico::protocol::async_tunnel::AsyncTunnelClient;
+use knx_pico::protocol::cemi::{ControlField1, ControlField2, Apci};
+use knx_pico::protocol::constants::CEMIMessageCode;
+use knx_pico::addressing::IndividualAddress;
+use knx_pico::{pico_log, ga};
 
 // ============================================================================
 // Configuration
@@ -444,7 +444,7 @@ async fn main(spawner: Spawner) {
                 pico_log!(info, "[Event #{}] Received cEMI frame ({} bytes)", event_count, cemi_data.len());
 
                 // Parse the cEMI frame
-                if let Ok(cemi) = knx_rs::protocol::cemi::CEMIFrame::parse(cemi_data) {
+                if let Ok(cemi) = knx_pico::protocol::cemi::CEMIFrame::parse(cemi_data) {
                     if let Ok(ldata) = cemi.as_ldata() {
                         if ldata.is_group_write() {
                             if let Some(dest) = ldata.destination_group() {

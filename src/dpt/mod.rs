@@ -15,7 +15,7 @@
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use knx_rs::dpt::{Dpt1, Dpt3, Dpt5, Dpt7, Dpt9, Dpt13, StepCode, DptEncode, DptDecode};
+//! use knx_pico::dpt::{Dpt1, Dpt3, Dpt5, Dpt7, Dpt9, Dpt13, StepCode, DptEncode, DptDecode};
 //!
 //! // Boolean value - uses encode() returning &'static [u8]
 //! let data = Dpt1::Switch.encode(true)?;

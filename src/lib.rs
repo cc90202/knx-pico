@@ -11,7 +11,7 @@
 #![allow(clippy::map_err_ignore)] // Error context not always needed
 #![allow(clippy::fn_params_excessive_bools)] // Legacy API, will refactor later
 
-//! # knx-rs
+//! # knx-pico
 //!
 //! KNXnet/IP protocol implementation for embedded systems.
 //!
@@ -29,7 +29,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::{KnxClient, GroupAddress};
+//! use knx_pico::{KnxClient, GroupAddress};
 //!
 //! // Connect to KNX gateway and send a command
 //! let addr = GroupAddress::new(1, 2, 3).unwrap();

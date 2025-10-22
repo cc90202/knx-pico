@@ -15,7 +15,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::protocol::async_tunnel::AsyncTunnelClient;
+//! use knx_pico::protocol::async_tunnel::AsyncTunnelClient;
 //! use embassy_net::Stack;
 //!
 //! let mut client = AsyncTunnelClient::new(

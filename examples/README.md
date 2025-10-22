@@ -1,6 +1,6 @@
 # KNX-RS Examples
 
-This directory contains practical examples demonstrating how to use `knx-rs` library.
+This directory contains practical examples demonstrating how to use `knx-pico` library.
 
 ## Prerequisites
 
@@ -290,14 +290,14 @@ These cover the most common use cases in KNX home automation. Additional DPT typ
 
 ## Convenience Macros
 
-The `knx-rs` library provides several macros to make your code more readable and concise:
+The `knx-pico` library provides several macros to make your code more readable and concise:
 
 ### `ga!` - Group Address Creation
 
 Create group addresses using familiar 3-level notation:
 
 ```rust
-use knx_rs::ga;
+use knx_pico::ga;
 
 let light = ga!(1/2/3);        // Main=1, Middle=2, Sub=3
 let temp_sensor = ga!(1/2/10);
@@ -309,7 +309,7 @@ let dimmer = ga!(2/1/5);
 Write values with inline address notation:
 
 ```rust
-use knx_rs::{knx_write, KnxValue};
+use knx_pico::{knx_write, KnxValue};
 
 // Turn on a light
 knx_write!(client, 1/2/3, KnxValue::Bool(true)).await?;
@@ -326,7 +326,7 @@ knx_write!(client, 2/1/5, KnxValue::Percent(75)).await?;
 Request values with inline address notation:
 
 ```rust
-use knx_rs::knx_read;
+use knx_pico::knx_read;
 
 // Request current temperature
 knx_read!(client, 1/2/10).await?;
@@ -348,7 +348,7 @@ match client.receive_event().await? {
 Respond to read requests with inline address notation:
 
 ```rust
-use knx_rs::{knx_respond, KnxValue, KnxEvent};
+use knx_pico::{knx_respond, KnxValue, KnxEvent};
 
 // Handle read requests
 match client.receive_event().await? {
@@ -365,7 +365,7 @@ match client.receive_event().await? {
 Register multiple DPT types in a single block:
 
 ```rust
-use knx_rs::{register_dpts, DptType};
+use knx_pico::{register_dpts, DptType};
 
 register_dpts! {
     client,

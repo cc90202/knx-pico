@@ -24,7 +24,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::dpt::{Dpt7, DptDecode};
+//! use knx_pico::dpt::{Dpt7, DptDecode};
 //!
 //! // Decode brightness in lux
 //! let lux = Dpt7::Brightness.decode(&[0x13, 0x88])?;  // 5000 lux

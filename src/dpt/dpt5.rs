@@ -19,7 +19,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::dpt::{Dpt5, DptEncode, DptDecode};
+//! use knx_pico::dpt::{Dpt5, DptEncode, DptDecode};
 //!
 //! // Encode percentage (0-100%)
 //! let data = Dpt5::Percentage.encode(75)?;  // [0xBF] = 191

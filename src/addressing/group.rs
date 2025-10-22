@@ -20,7 +20,7 @@ use core::fmt;
 /// # Examples
 ///
 /// ```
-/// use knx_rs::GroupAddress;
+/// use knx_pico::GroupAddress;
 ///
 /// // Create 3-level address
 /// let addr = GroupAddress::new(1, 2, 3).unwrap();
@@ -109,11 +109,11 @@ impl GroupAddress {
     /// # Examples
     ///
     /// ```
-    /// use knx_rs::GroupAddress;
+    /// use knx_pico::GroupAddress;
     ///
     /// let addr = GroupAddress::from_array([1, 2, 3])?;
     /// assert_eq!(addr.to_string(), "1/2/3");
-    /// # Ok::<(), knx_rs::KnxError>(())
+    /// # Ok::<(), knx_pico::KnxError>(())
     /// ```
     pub fn from_array(parts: [u8; 3]) -> Result<Self> {
         Self::new(parts[0], parts[1], parts[2])

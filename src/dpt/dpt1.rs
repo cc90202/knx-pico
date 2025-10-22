@@ -22,7 +22,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::dpt::{Dpt1, DptEncode, DptDecode};
+//! use knx_pico::dpt::{Dpt1, DptEncode, DptDecode};
 //!
 //! // Turn on a switch
 //! let data = Dpt1::Switch.encode(true)?;  // [0x01]

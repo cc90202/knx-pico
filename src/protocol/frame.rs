@@ -24,7 +24,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::protocol::frame::KnxnetIpFrame;
+//! use knx_pico::protocol::frame::KnxnetIpFrame;
 //!
 //! // Parse an incoming frame (zero-copy)
 //! let frame = KnxnetIpFrame::parse(&buffer)?;

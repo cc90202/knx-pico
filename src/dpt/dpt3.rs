@@ -29,7 +29,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_rs::dpt::{Dpt3, StepCode};
+//! use knx_pico::dpt::{Dpt3, StepCode};
 //!
 //! // Increase dimming by 4 intervals
 //! let cmd = Dpt3::Dimming.encode_to_byte(true, StepCode::Intervals4)?;
@@ -100,12 +100,12 @@ impl Dpt3 {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use knx_rs::dpt::{Dpt3, StepCode};
+    /// use knx_pico::dpt::{Dpt3, StepCode};
     ///
     /// // Increase dimming by 4 intervals
     /// let byte = Dpt3::Dimming.encode_to_byte(true, StepCode::Intervals4)?;
     /// assert_eq!(byte, 0x0B); // 0b00001011
-    /// # Ok::<(), knx_rs::KnxError>(())
+    /// # Ok::<(), knx_pico::KnxError>(())
     /// ```
     #[inline]
     pub fn encode_to_byte(&self, control: bool, stepcode: StepCode) -> Result<u8> {
@@ -131,12 +131,12 @@ impl Dpt3 {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use knx_rs::dpt::{Dpt3, StepCode};
+    /// use knx_pico::dpt::{Dpt3, StepCode};
     ///
     /// let cmd = Dpt3::Dimming.decode(&[0x0B])?;
     /// assert_eq!(cmd.control, true);
     /// assert_eq!(cmd.stepcode, StepCode::Intervals4);
-    /// # Ok::<(), knx_rs::KnxError>(())
+    /// # Ok::<(), knx_pico::KnxError>(())
     /// ```
     pub fn decode(&self, data: &[u8]) -> Result<ControlCommand> {
         if data.is_empty() {

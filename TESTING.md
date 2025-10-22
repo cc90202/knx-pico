@@ -1,6 +1,6 @@
 # Testing Guide
 
-This guide explains how to test `knx-rs` with or without physical KNX hardware.
+This guide explains how to test `knx-pico` with or without physical KNX hardware.
 
 ## Table of Contents
 
