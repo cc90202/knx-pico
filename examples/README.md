@@ -10,7 +10,7 @@ This directory contains practical examples demonstrating how to use `knx-rs` lib
 
 ```bash
 # Start the simulator (in a separate terminal)
-python3 knx_search.py
+python3 knx_simulator.py
 ```
 
 The simulator must be running before executing any examples. See [../TESTING.md](../TESTING.md) for detailed setup instructions.
@@ -23,9 +23,11 @@ Complete example showing KNX communication with Raspberry Pi Pico 2 W over WiFi.
 
 **Features:**
 - WiFi connection with CYW43 driver
+- **Automatic KNX gateway discovery** via multicast (no hardcoded IPs!)
 - Async KNXnet/IP tunneling client
 - Send GroupValue_Write commands (turn lights on/off)
 - Receive and parse GroupValue_Indication events from KNX bus
+- Uses `ga!` macro for readable group address notation
 
 **Hardware Requirements:**
 - Raspberry Pi Pico 2 W
@@ -34,16 +36,23 @@ Complete example showing KNX communication with Raspberry Pi Pico 2 W over WiFi.
 
 **Setup:**
 
-1. Configure WiFi and KNX gateway in `examples/pico_knx_async.rs`:
+1. **Configure WiFi** in `src/configuration.rs`:
    ```rust
-   const WIFI_SSID: &str = "Your_WiFi_SSID";
-   const WIFI_PASSWORD: &str = "Your_WiFi_Password";
-   const KNX_GATEWAY_IP: [u8; 4] = [192, 168, 1, 10]; // Your gateway IP
+   pub const CONFIG: &str = r#"
+   WIFI_NETWORK=Your_WiFi_SSID
+   WIFI_PASSWORD=Your_WiFi_Password
+   "#;
    ```
 
-2. Update KNX group addresses for your devices:
+   **Note:** The KNX gateway is automatically discovered via multicast - no manual IP configuration needed!
+
+2. Update KNX group addresses for your devices using the convenient macros:
    ```rust
-   const LIGHT_LIVING_ROOM_RAW: u16 = 0x0A03; // 1/2/3
+   // ga! macro - Create group addresses with readable notation
+   let light_addr = ga!(1/2/3);   // Living room light
+   let dimmer_addr = ga!(1/2/5);  // Dimmer control
+   let valve_addr = ga!(1/2/6);   // Valve position
+   let temp_addr = ga!(1/2/7);    // Temperature sensor
    ```
 
 3. Flash to Pico:
@@ -64,35 +73,57 @@ Complete example showing KNX communication with Raspberry Pi Pico 2 W over WiFi.
 
 1. **Connects to WiFi**: Joins your WiFi network using CYW43 driver
 2. **Gets IP via DHCP**: Waits for network configuration
-3. **Connects to KNX gateway**: Establishes KNXnet/IP tunnel connection
-4. **Sends commands**:
-   - Turns ON a light (GroupValue_Write with DPT 1 = true)
-   - Turns OFF the light after 2 seconds
-5. **Listens for events**: Receives and parses all KNX bus traffic
+3. **Discovers KNX gateway**: Automatically finds gateway via multicast (or uses fallback IP)
+4. **Connects to KNX gateway**: Establishes KNXnet/IP tunnel connection
+5. **Sends commands** demonstrating different DPT types:
+   - **DPT 1 (Boolean)**: Turns ON/OFF a light
+   - **DPT 3 (Dimming)**: Increases brightness by 4 steps
+   - **DPT 5 (Percentage)**: Sets valve position to 75%
+   - **DPT 9 (Temperature)**: Writes temperature setpoint (21.5°C)
+6. **Listens for events**: Receives and parses all KNX bus traffic
 
 **Important**: The example runs for a short time. For long-running applications, you MUST implement heartbeat/keep-alive by calling `client.send_heartbeat()` every 60 seconds, otherwise the gateway will close the connection.
 
 **Understanding the Code:**
 
-The example demonstrates low-level cEMI frame construction:
+The example demonstrates low-level cEMI frame construction for different DPT types:
 
 ```rust
-// Build a GroupValue_Write frame for boolean (DPT 1)
+// DPT 1: Boolean (1-bit in 6-bit APCI)
 fn build_group_write_bool(group_addr: GroupAddress, value: bool) -> [u8; 11] {
-    let mut frame = [0u8; 11];
+    // Frame: 11 bytes (standard + 1 byte NPDU)
+    // APCI: 0x80 (write) + value (0 or 1)
+    frame[10] = if value { 0x81 } else { 0x80 };
+}
 
-    frame[0] = CEMIMessageCode::LDataReq.to_u8();  // L_Data.req
-    frame[1] = 0x00;                                // No additional info
-    frame[2] = ControlField1::default().raw();      // Standard frame
-    frame[3] = ControlField2::default().raw();      // Group address
-    // ... source and destination addresses
-    frame[8] = 0x01;                                // NPDU length
-    frame[9] = 0x00;                                // TPCI
-    frame[10] = if value { 0x81 } else { 0x80 };   // APCI + value
+// DPT 3: Dimming/Blind Control (4-bit control)
+fn build_group_write_dpt3(group_addr: GroupAddress, value: u8) -> [u8; 11] {
+    // Format: cccc SUUU (control, step direction, step code)
+    // Example: 0x0B = increase by 4 steps
+    frame[10] = 0x80 | (value & 0x0F);
+}
 
-    frame
+// DPT 5: Percentage (8-bit unsigned)
+fn build_group_write_dpt5(group_addr: GroupAddress, value: u8) -> [u8; 12] {
+    // Frame: 12 bytes (standard + 2 bytes NPDU)
+    // Range: 0x00 (0%) to 0xFF (100%)
+    frame[11] = value;
+}
+
+// DPT 9: Temperature (2-byte float)
+fn build_group_write_dpt9(group_addr: GroupAddress, high: u8, low: u8) -> [u8; 13] {
+    // Frame: 13 bytes (standard + 3 bytes NPDU)
+    // Format: MEEE EMMM MMMM MMMM (mantissa + exponent)
+    // Value = (0.01 * M) * 2^E
+    frame[11] = high;
+    frame[12] = low;
 }
 ```
+
+This comprehensive example helps you understand:
+- **Frame structure** for different data types
+- **NPDU length** varies by DPT (1-3 bytes)
+- **Encoding rules** for each DPT type
 
 **Heartbeat / Keep-Alive:**
 
@@ -143,7 +174,9 @@ Interactive KNX sniffer/tester tool for debugging and testing KNX communication.
 
 **Features:**
 - Gateway discovery via multicast
-- Read and write operations
+- **Convenience macros demonstrated**: `ga!`, `knx_read!`, `knx_write!`
+- High-level `KnxClient` API demonstration
+- DPT type registration and response examples
 - Event monitoring
 - USB or defmt logging support
 
@@ -190,8 +223,12 @@ cargo flash-sniffer-release        # defmt + release
 1. Connects to WiFi
 2. Discovers KNX gateway via multicast
 3. Establishes tunnel connection
-4. Performs test read/write operations
-5. Monitors KNX bus events
+4. Demonstrates convenience macros:
+   - `ga!` - Group address creation
+   - `knx_read!` - Read request
+   - `knx_write!` - Write commands
+5. Shows DPT type registration and response operations
+6. Monitors KNX bus events (optional, disabled by default)
 
 **Note:** Ensure the KNX simulator is running if you don't have physical hardware!
 
@@ -240,10 +277,108 @@ probe-rs run --chip RP2350 target/thumbv8m.main-none-eabihf/release/examples/<ex
 
 **Note:** All examples run on hardware only, not with `cargo run`. They must be flashed to Pico 2 W.
 
-## Future Examples
+## Supported DPT Types
 
-Planned examples:
-- Temperature sensor with DPT 9
-- Dimmer control with DPT 5
-- Multi-device control
-- High-level API usage (when available)
+The `pico_knx_async.rs` example demonstrates the following KNX datapoint types:
+
+- **DPT 1**: Boolean (switch, on/off)
+- **DPT 3**: 4-bit control (dimming, blinds)
+- **DPT 5**: 8-bit unsigned (percentage, angle, counter)
+- **DPT 9**: 2-byte float (temperature, illuminance, wind speed)
+
+These cover the most common use cases in KNX home automation. Additional DPT types can be implemented following the same pattern.
+
+## Convenience Macros
+
+The `knx-rs` library provides several macros to make your code more readable and concise:
+
+### `ga!` - Group Address Creation
+
+Create group addresses using familiar 3-level notation:
+
+```rust
+use knx_rs::ga;
+
+let light = ga!(1/2/3);        // Main=1, Middle=2, Sub=3
+let temp_sensor = ga!(1/2/10);
+let dimmer = ga!(2/1/5);
+```
+
+### `knx_write!` - Simplified Write
+
+Write values with inline address notation:
+
+```rust
+use knx_rs::{knx_write, KnxValue};
+
+// Turn on a light
+knx_write!(client, 1/2/3, KnxValue::Bool(true)).await?;
+
+// Set temperature setpoint
+knx_write!(client, 1/2/10, KnxValue::Temperature(21.5)).await?;
+
+// Set dimmer percentage
+knx_write!(client, 2/1/5, KnxValue::Percent(75)).await?;
+```
+
+### `knx_read!` - Simplified Read
+
+Request values with inline address notation:
+
+```rust
+use knx_rs::knx_read;
+
+// Request current temperature
+knx_read!(client, 1/2/10).await?;
+
+// Request switch state
+knx_read!(client, 1/2/3).await?;
+
+// Response arrives via receive_event()
+match client.receive_event().await? {
+    Some(KnxEvent::GroupResponse { address, value }) => {
+        // Handle the response
+    }
+    _ => {}
+}
+```
+
+### `knx_respond!` - Simplified Response
+
+Respond to read requests with inline address notation:
+
+```rust
+use knx_rs::{knx_respond, KnxValue, KnxEvent};
+
+// Handle read requests
+match client.receive_event().await? {
+    Some(KnxEvent::GroupRead { address }) => {
+        // Respond with current value
+        knx_respond!(client, 1/2/10, KnxValue::Temperature(21.5)).await?;
+    }
+    _ => {}
+}
+```
+
+### `register_dpts!` - Batch DPT Registration
+
+Register multiple DPT types in a single block:
+
+```rust
+use knx_rs::{register_dpts, DptType};
+
+register_dpts! {
+    client,
+    1/2/3  => Bool,         // Light switch
+    1/2/5  => Percent,      // Dimmer
+    1/2/10 => Temperature,  // Temp sensor
+    1/2/11 => Humidity,     // Humidity sensor
+    2/1/5  => Lux,          // Light sensor
+}?;
+```
+
+**Important Notes:**
+- These macros (`knx_write!`, `knx_read!`, `knx_respond!`, `register_dpts!`) work **only** with the high-level `KnxClient` API
+- The `ga!` macro works with **both** `KnxClient` and `AsyncTunnelClient`
+- The `knx_sniffer.rs` example demonstrates macro usage with `KnxClient`
+- The `pico_knx_async.rs` example uses `AsyncTunnelClient` for low-level frame construction (educational purposes)
