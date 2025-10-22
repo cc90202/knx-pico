@@ -313,15 +313,28 @@ Client                           Gateway
 
 ## Quick Start (Raspberry Pi Pico 2 W)
 
+### Prerequisites
+
+**⚠️ Important:** For testing without physical KNX hardware, you need to run the KNX gateway simulator:
+
+```bash
+# Start the simulator (in a separate terminal)
+python3 knx_search.py
+```
+
+The simulator provides a virtual KNXnet/IP gateway for development and testing. See [TESTING.md](TESTING.md) for detailed setup instructions.
+
+### Basic Usage
+
 ```rust
 use knx_rs::protocol::async_tunnel::AsyncTunnelClient;
 use knx_rs::addressing::GroupAddress;
 
-// Connect to KNX gateway
+// Connect to KNX gateway (or simulator)
 let mut client = AsyncTunnelClient::new(
     &stack,
     rx_meta, tx_meta, rx_buffer, tx_buffer,
-    [192, 168, 1, 10],  // Gateway IP
+    [192, 168, 1, 10],  // Gateway IP (or simulator IP)
     3671,               // Gateway port
 );
 client.connect().await?;
