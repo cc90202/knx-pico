@@ -128,26 +128,62 @@ screen /dev/tty.usbmodem* 115200
 
 ## Running Tests
 
+### Automated Test Runner (Recommended)
+
+Use the automated test runner that manages the simulator for you:
+
+```bash
+# Run all tests (unit + integration + examples)
+python3 test_runner.py
+
+# Run only unit tests (no simulator needed)
+python3 test_runner.py --unit-only
+
+# Run only integration tests (with simulator)
+python3 test_runner.py --integration-only
+
+# Check only examples compile
+python3 test_runner.py --examples-only
+
+# Verbose output
+python3 test_runner.py --verbose
+```
+
+**Or use Make:**
+```bash
+make test              # All tests
+make test-unit         # Unit tests only
+make test-integration  # Integration tests only
+make test-examples     # Check examples
+make pre-publish       # Full pre-publish checks
+```
+
 ### Unit Tests (Host)
 
 Run unit tests on your development machine:
 
 ```bash
 # Run all tests
-cargo test-host
+cargo test --lib
 
 # Run specific test
-cargo test-host test_group_address
+cargo test --lib test_group_address
 ```
 
 ### Integration Tests (with Simulator)
 
+**Manual approach:**
 ```bash
 # Terminal 1: Start simulator
-python3 knx_search.py
+python3 knx_simulator.py --verbose
 
 # Terminal 2: Run integration tests
-cargo test --test integration_tests
+cargo test --test integration_test -- --ignored --test-threads=1
+```
+
+**Automated approach (recommended):**
+```bash
+python3 test_runner.py --integration-only
 ```
 
 ### Embedded Tests (on Hardware)
@@ -254,6 +290,57 @@ rustup target add thumbv8m.main-none-eabihf
 - Reconnect USB cable
 - Restart serial monitor
 
+## Continuous Integration
+
+The project uses GitHub Actions for automated testing:
+
+### CI Workflow (`.github/workflows/ci.yml`)
+
+Runs on every push and pull request:
+- ✅ Format checking (`cargo fmt`)
+- ✅ Linting (`cargo clippy`)
+- ✅ Library build (no_std)
+- ✅ Unit tests (multiple OS)
+- ✅ Integration tests with simulator
+- ✅ Embedded target compilation (RP2040)
+- ✅ Example compilation verification
+- ✅ Documentation build
+- ✅ Security audit
+
+### Release Workflow (`.github/workflows/release.yml`)
+
+Runs on version tags (e.g., `v0.1.0`):
+- ✅ Full test suite
+- ✅ Version verification
+- ✅ Documentation build with strict warnings
+- ✅ Dry-run publish
+- ✅ Publish to crates.io
+- ✅ Create GitHub release
+
+## Pre-publish Checklist
+
+Before publishing to crates.io, run:
+
+```bash
+# Automated checks
+make pre-publish
+
+# Or manually:
+python3 test_runner.py --verbose
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --no-deps --lib --all-features
+cargo publish --dry-run
+```
+
+This ensures:
+1. ✅ All tests pass (unit, integration, examples)
+2. ✅ Code is properly formatted
+3. ✅ No clippy warnings
+4. ✅ Documentation builds without warnings
+5. ✅ All public APIs are documented
+6. ✅ Package can be published
+
 ## Best Practices
 
 1. **Always start simulator first** when testing without hardware
@@ -262,12 +349,15 @@ rustup target add thumbv8m.main-none-eabihf
 4. **Keep simulator logs visible** - helps understand protocol flow
 5. **Use release builds** - debug builds may timeout due to slower execution
 6. **Implement heartbeat** - for long-running applications (every 60 seconds)
+7. **Run pre-publish checks** - before publishing to crates.io
+8. **Use automated test runner** - `python3 test_runner.py` for comprehensive testing
 
 ## Additional Resources
 
 - [KNX Association](https://www.knx.org/) - Official KNX specifications
 - [examples/README.md](examples/README.md) - Example usage and documentation
 - [KNX_DISCOVERY.md](KNX_DISCOVERY.md) - Gateway discovery protocol details
+- [Makefile](Makefile) - Common commands and shortcuts
 
 ## Getting Help
 
@@ -275,4 +365,6 @@ If you encounter issues:
 1. Check this troubleshooting guide
 2. Review example code and comments
 3. Examine simulator verbose output for protocol errors
-4. Open an issue on GitHub with detailed logs and steps to reproduce
+4. Run automated tests: `python3 test_runner.py --verbose`
+5. Check CI status in GitHub Actions
+6. Open an issue on GitHub with detailed logs and steps to reproduce

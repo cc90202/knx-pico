@@ -413,10 +413,34 @@ knx-rs/
 │   ├── dpt9.rs          # 16-bit float (Temperature, Humidity)
 │   └── dpt13.rs         # 32-bit signed (Counter)
 ├── examples/            # Practical examples
-│   └── pico_knx_async.rs # Complete Pico 2 W example
+│   ├── pico_knx_async.rs # Complete Pico 2 W example
+│   └── knx_sniffer.rs   # Interactive testing tool
+├── tests/               # Integration tests
+│   └── integration_test.rs # Tests with simulator
 ├── error.rs             # Error types
 └── lib.rs               # Public API
 ```
+
+## Testing
+
+The project includes comprehensive testing with automated simulator:
+
+```bash
+# Run all tests (automatically starts simulator)
+python3 test_runner.py
+
+# Or use Make
+make test              # All tests
+make test-unit         # Unit tests only
+make pre-publish       # Pre-publish checks
+```
+
+See [TESTING.md](TESTING.md) for detailed testing guide including:
+- Testing without physical hardware (using simulator)
+- Integration tests
+- Example verification
+- CI/CD setup
+- Pre-publish checklist
 
 ## License
 
