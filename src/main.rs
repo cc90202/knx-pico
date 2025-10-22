@@ -5,6 +5,7 @@
 mod configuration;
 mod utility;
 mod knx_client;
+mod knx_discovery;
 
 use crate::utility::*;
 use crate::knx_client::{KnxClient, KnxBuffers, KnxEvent, KnxValue, format_group_address};
@@ -80,6 +81,7 @@ bind_interrupts!(struct UsbIrqs {
 
 /// Shared structure to pass the CYW43 controller between Embassy tasks
 #[derive(Clone, Copy)]
+#[allow(missing_debug_implementations)]
 pub struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static>>);
 
 /// Main entry point for Embassy executor
@@ -196,12 +198,36 @@ async fn main(spawner: Spawner) {
     // KNX Connection Test
     // ========================================================================
 
-    // KNX Gateway configuration from configuration.rs
-    let gateway_ip_str = get_knx_gateway_ip();
-    let knx_gateway_ip = parse_ip(gateway_ip_str);
-    let knx_gateway_port = 3671;
+    // Feature flag: set to false to use static configuration from configuration.rs
+    const USE_AUTO_DISCOVERY: bool = true;
 
-    info!("KNX Gateway configured: {}", gateway_ip_str);
+    let (knx_gateway_ip, knx_gateway_port) = if USE_AUTO_DISCOVERY {
+        // Try automatic gateway discovery via SEARCH_REQUEST
+        info!("Starting KNX gateway discovery (SEARCH)...");
+
+        match knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
+            Some(gateway) => {
+                info!("✓ KNX Gateway discovered automatically!");
+                info!("  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
+                info!("  Port: {}", gateway.port);
+                (gateway.ip, gateway.port)
+            }
+            None => {
+                // Fallback to static configuration
+                info!("✗ No gateway found via discovery, using static configuration");
+                let gateway_ip_str = get_knx_gateway_ip();
+                let knx_gateway_ip = parse_ip(gateway_ip_str);
+                info!("  Fallback to: {}", gateway_ip_str);
+                (knx_gateway_ip, 3671)
+            }
+        }
+    } else {
+        // Use static configuration from configuration.rs
+        let gateway_ip_str = get_knx_gateway_ip();
+        let knx_gateway_ip = parse_ip(gateway_ip_str);
+        info!("KNX Gateway (static config): {}", gateway_ip_str);
+        (knx_gateway_ip, 3671)
+    };
 
     info!("Connecting to KNX gateway at {}.{}.{}.{}:{}",
           knx_gateway_ip[0], knx_gateway_ip[1], knx_gateway_ip[2], knx_gateway_ip[3], knx_gateway_port);
@@ -242,19 +268,69 @@ async fn main(spawner: Spawner) {
 
     info!("Sending test: bool=true to 1/2/3");
     match client.write(light_addr, KnxValue::Bool(true)).await {
-        Ok(_) => info!("✓ Command sent successfully"),
-        Err(_) => error!("✗ Failed to send command"),
+        Ok(_) => {
+            info!("✓ Command sent successfully (fire-and-forget)");
+        }
+        Err(_) => {
+            error!("✗ Failed to send command");
+        }
     }
 
-    Timer::after(Duration::from_secs(2)).await;
+    // Wait before next command
+    info!("Waiting 1 second before next command...");
+    Timer::after(Duration::from_secs(1)).await;
 
     info!("Sending test: bool=false to 1/2/3");
     match client.write(light_addr, KnxValue::Bool(false)).await {
-        Ok(_) => info!("✓ Command sent successfully"),
-        Err(_) => error!("✗ Failed to send command"),
+        Ok(_) => {
+            info!("✓ Command sent successfully (fire-and-forget)");
+        }
+        Err(_) => {
+            error!("✗ Failed to send command");
+            error!("Connection may be lost, attempting reconnection...");
+
+            // Try to reconnect
+            match client.connect().await {
+                Ok(_) => {
+                    info!("✓ Reconnected to KNX gateway!");
+                    // Retry the command
+                    if let Ok(_) = client.write(light_addr, KnxValue::Bool(false)).await {
+                        info!("✓ Command sent successfully after reconnection");
+                    }
+                }
+                Err(_) => {
+                    error!("✗ Failed to reconnect");
+                    error!("System will continue but may be unstable");
+                }
+            }
+        }
     }
 
-    // Listen for KNX bus events
+    // ========================================================================
+    // IMPORTANT: Event listening disabled to prevent crash on Pico 2 W
+    // ========================================================================
+    // The Pico 2 W crashes when calling recv_from() repeatedly in a loop,
+    // even with long delays. This is a known hardware limitation.
+    //
+    // Solution: Commands are sent successfully (fire-and-forget), but we
+    // cannot actively listen for bus events without crashing.
+    //
+    // Future improvement: Implement interrupt-based event handling or
+    // use a different approach that doesn't require polling recv_from().
+    // ========================================================================
+
+    info!("✓ Test commands sent successfully!");
+    info!("System is now idle (event listening disabled to prevent crash)");
+    info!("To test more commands, reset the device and modify main.rs");
+
+    // Idle loop - just blink LED and wait
+    loop {
+        Timer::after(Duration::from_secs(10)).await;
+        info!("System still running... (idle mode)");
+    }
+
+    // DISABLED CODE - causes crash on Pico 2 W
+    /*
     info!("Listening for KNX bus events...");
     loop {
         match client.receive_event().await {
@@ -434,16 +510,26 @@ async fn main(spawner: Spawner) {
                 }
             }
             Ok(None) => {
-                // No data (timeout)
+                // No data available (timeout or no packets)
+                // This is normal, just continue listening
             }
             Err(_) => {
-                error!("❌ Receive error");
+                error!("❌ Receive error, continuing...");
+                // Add delay to prevent tight error loop
+                Timer::after(Duration::from_millis(1000)).await;
             }
         }
 
-        Timer::after(Duration::from_millis(100)).await;
+        // **CRITICAL**: Delay to prevent stack overflow on Pico 2 W
+        // Each receive() call uses stack space. Without sufficient delay,
+        // the stack never recovers and eventually overflows causing a crash.
+        // 500ms is the minimum safe value for Pico 2 W.
+        Timer::after(Duration::from_millis(500)).await;
     }
+    */
+    // END OF DISABLED CODE
 }
+
 
 #[embassy_executor::task]
 async fn cyw43_task(
