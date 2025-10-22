@@ -33,9 +33,11 @@ pub mod error;
 pub mod net;
 pub mod protocol;
 
-// Macro module (must be declared before use)
+// Macro modules (must be declared before use)
 #[macro_use]
 pub mod macros;
+#[macro_use]
+pub mod logging;
 
 // Re-export commonly used types
 #[doc(inline)]
