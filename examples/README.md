@@ -46,15 +46,17 @@ Complete example showing KNX communication with Raspberry Pi Pico 2 W over WiFi.
    const LIGHT_LIVING_ROOM_RAW: u16 = 0x0A03; // 1/2/3
    ```
 
-3. Build and flash:
+3. Flash to Pico:
+
+   **Option 1: USB logger (recommended):**
    ```bash
-   cargo build-rp2040 --example pico_knx_async --release
-   probe-rs run --chip RP2350 target/thumbv8m.main-none-eabihf/release/examples/pico_knx_async
+   cargo flash-example-usb
+   # Monitor: screen /dev/tty.usbmodem* 115200
    ```
 
-4. Monitor output:
+   **Option 2: defmt logger (requires probe):**
    ```bash
-   # The example uses defmt + defmt-rtt for logging
+   cargo build --release --example pico_knx_async --target thumbv8m.main-none-eabihf --features embassy-rp
    probe-rs run --chip RP2350 target/thumbv8m.main-none-eabihf/release/examples/pico_knx_async
    ```
 
@@ -193,20 +195,50 @@ cargo flash-sniffer-release        # defmt + release
 
 **Note:** Ensure the KNX simulator is running if you don't have physical hardware!
 
-## Building Examples
+## Building and Flashing Examples
 
-All examples require the `embassy-rp` feature:
+All embedded examples target Raspberry Pi Pico 2 W and require either USB or defmt logger.
 
+### Quick Commands
+
+**pico_knx_async:**
 ```bash
-# Check compilation
-cargo check-rp2040 --example pico_knx_async
+# USB logger (recommended)
+cargo flash-example-usb
 
-# Build release binary
-cargo build-rp2040 --example pico_knx_async --release
-
-# Flash to hardware
+# defmt logger (requires probe)
+cargo build --release --example pico_knx_async --target thumbv8m.main-none-eabihf --features embassy-rp
 probe-rs run --chip RP2350 target/thumbv8m.main-none-eabihf/release/examples/pico_knx_async
 ```
+
+**knx_sniffer:**
+```bash
+# USB logger (recommended)
+cargo flash-sniffer-usb-release
+
+# defmt logger (requires probe)
+cargo flash-sniffer-release
+```
+
+### Manual Build Process
+
+If you need to customize the build:
+
+```bash
+# Build for USB logger
+cargo build --release --example <example_name> --target thumbv8m.main-none-eabihf --features embassy-rp-usb
+
+# Build for defmt logger
+cargo build --release --example <example_name> --target thumbv8m.main-none-eabihf --features embassy-rp
+
+# Flash with picotool (USB logger builds)
+picotool load -u -v -x -t elf target/thumbv8m.main-none-eabihf/release/examples/<example_name>
+
+# Flash with probe-rs (defmt builds)
+probe-rs run --chip RP2350 target/thumbv8m.main-none-eabihf/release/examples/<example_name>
+```
+
+**Note:** All examples run on hardware only, not with `cargo run`. They must be flashed to Pico 2 W.
 
 ## Future Examples
 
