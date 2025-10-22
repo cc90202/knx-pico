@@ -5,12 +5,11 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Cristiano Chieppa"]
 description = "KNXnet/IP protocol implementation for embedded systems"
-repository = "https://github.com/yourusername/knx-rs"
+repository = "https://github.com/cc90202/knx-rs"
+homepage = "https://github.com/cc90202/knx-rs"
 readme = "README.md"
 keywords = ["knx", "knxnet-ip", "embedded", "no-std", "home-automation"]
 categories = ["embedded", "no-std", "network-programming"]
-
-publish = false
 
 [lib]
 name = "knx_rs"
