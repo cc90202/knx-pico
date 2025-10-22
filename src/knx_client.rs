@@ -425,6 +425,7 @@ pub enum KnxEvent {
 ///
 /// This struct holds all the buffers needed for UDP communication.
 /// Use this with [`KnxClientBuilder::build_with_buffers`].
+#[derive(Debug)]
 pub struct KnxBuffers {
     /// Receive packet metadata
     pub rx_meta: [PacketMetadata; DEFAULT_METADATA_COUNT],
@@ -478,6 +479,7 @@ impl Default for KnxBuffers {
 ///
 /// client.connect().await?;
 /// ```
+#[derive(Debug)]
 pub struct KnxClientBuilder {
     gateway_ip: [u8; 4],
     gateway_port: u16,
@@ -632,6 +634,7 @@ impl KnxClientBuilder {
 ///     .device_address([1, 1, 1])
 ///     .build_with_buffers(&stack, &mut buffers)?;
 /// ```
+#[derive(Debug)]
 pub struct KnxClient<'a> {
     tunnel: AsyncTunnelClient<'a>,
     device_address: u16,

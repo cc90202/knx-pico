@@ -1,6 +1,7 @@
 //! Utility functions for configuration parsing
 
-use crate::configuration::CONFIG;
+// Use super::configuration for compatibility with both main.rs and examples
+use super::configuration::CONFIG;
 
 /// Extracts the WiFi SSID from configuration.
 ///

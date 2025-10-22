@@ -39,6 +39,7 @@ pub mod macros;
 #[macro_use]
 pub mod logging;
 
+
 // Re-export commonly used types
 #[doc(inline)]
 pub use addressing::{GroupAddress, IndividualAddress};
