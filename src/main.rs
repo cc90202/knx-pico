@@ -8,7 +8,7 @@ mod knx_client;
 mod knx_discovery;
 
 use crate::utility::*;
-use crate::knx_client::{KnxClient, KnxBuffers, KnxEvent, KnxValue, format_group_address};
+use crate::knx_client::{KnxClient, KnxBuffers, KnxValue};
 use cyw43::Control;
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::unwrap;
@@ -39,23 +39,8 @@ use embassy_net::{Config, StackResources};
 // KNX imports
 use knx_rs::addressing::GroupAddress;
 
-// Conditional logging macros
-#[cfg(feature = "usb-logger")]
-macro_rules! info {
-    ($($arg:tt)*) => {
-        log::info!($($arg)*)
-    };
-}
-
-#[cfg(feature = "usb-logger")]
-macro_rules! error {
-    ($($arg:tt)*) => {
-        log::error!($($arg)*)
-    };
-}
-
-#[cfg(not(feature = "usb-logger"))]
-use defmt::{info, error};
+// Import unified logging macro from knx_rs crate
+use knx_rs::pico_log;
 
 // Program metadata for `picotool info`
 #[unsafe(link_section = ".bi_entries")]
@@ -97,7 +82,7 @@ async fn main(spawner: Spawner) {
     }
 
     if let Some(panic_message) = panic_persist::get_panic_message_utf8() {
-        error!("{}", panic_message);
+        pico_log!(error, "{}", panic_message);
         loop {
             Timer::after_secs(5).await;
         }
@@ -137,7 +122,7 @@ async fn main(spawner: Spawner) {
 
     // Generate random seed for network stack
     let seed: u64 = RoscRng.next_u64();
-    info!("Random seed: {}", seed);
+    pico_log!(info, "Random seed: {}", seed);
 
     // Initialize network stack
     static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
@@ -162,7 +147,7 @@ async fn main(spawner: Spawner) {
     let wifi_ssid = get_ssid();
     let wifi_password = get_wifi_password();
 
-    info!("Connecting to WiFi network: {}", wifi_ssid);
+    pico_log!(info, "Connecting to WiFi network: {}", wifi_ssid);
 
     // Join WiFi network
     loop {
@@ -170,11 +155,11 @@ async fn main(spawner: Spawner) {
             let mut control = shared_control.0.lock().await;
             match control.join(wifi_ssid, cyw43::JoinOptions::new(wifi_password.as_bytes())).await {
                 Ok(_) => {
-                    info!("WiFi connected successfully!");
+                    pico_log!(info, "WiFi connected successfully!");
                     break;
                 }
                 Err(e) => {
-                    error!("WiFi connection failed: status={}, retrying in 5s...", e.status);
+                    pico_log!(error, "WiFi connection failed: status={}, retrying in 5s...", e.status);
                 }
             }
         }
@@ -182,17 +167,17 @@ async fn main(spawner: Spawner) {
     }
 
     // Wait for DHCP to assign IP address
-    info!("Waiting for DHCP...");
+    pico_log!(info, "Waiting for DHCP...");
     while !stack.is_config_up() {
         Timer::after_millis(100).await;
     }
 
     if let Some(config) = stack.config_v4() {
-        info!("IP Address: {}", config.address);
-        info!("Gateway: {:?}", config.gateway);
+        pico_log!(info, "IP Address: {}", config.address);
+        pico_log!(info, "Gateway: {:?}", config.gateway);
     }
 
-    info!("KNX-RS initialized and network ready!");
+    pico_log!(info, "KNX-RS initialized and network ready!");
 
     // ========================================================================
     // KNX Connection Test
@@ -203,21 +188,21 @@ async fn main(spawner: Spawner) {
 
     let (knx_gateway_ip, knx_gateway_port) = if USE_AUTO_DISCOVERY {
         // Try automatic gateway discovery via SEARCH_REQUEST
-        info!("Starting KNX gateway discovery (SEARCH)...");
+        pico_log!(info, "Starting KNX gateway discovery (SEARCH)...");
 
         match knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
             Some(gateway) => {
-                info!("✓ KNX Gateway discovered automatically!");
-                info!("  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
-                info!("  Port: {}", gateway.port);
+                pico_log!(info, "✓ KNX Gateway discovered automatically!");
+                pico_log!(info, "  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
+                pico_log!(info, "  Port: {}", gateway.port);
                 (gateway.ip, gateway.port)
             }
             None => {
                 // Fallback to static configuration
-                info!("✗ No gateway found via discovery, using static configuration");
+                pico_log!(info, "✗ No gateway found via discovery, using static configuration");
                 let gateway_ip_str = get_knx_gateway_ip();
                 let knx_gateway_ip = parse_ip(gateway_ip_str);
-                info!("  Fallback to: {}", gateway_ip_str);
+                pico_log!(info, "  Fallback to: {}", gateway_ip_str);
                 (knx_gateway_ip, 3671)
             }
         }
@@ -225,11 +210,11 @@ async fn main(spawner: Spawner) {
         // Use static configuration from configuration.rs
         let gateway_ip_str = get_knx_gateway_ip();
         let knx_gateway_ip = parse_ip(gateway_ip_str);
-        info!("KNX Gateway (static config): {}", gateway_ip_str);
+        pico_log!(info, "KNX Gateway (static config): {}", gateway_ip_str);
         (knx_gateway_ip, 3671)
     };
 
-    info!("Connecting to KNX gateway at {}.{}.{}.{}:{}",
+    pico_log!(info, "Connecting to KNX gateway at {}.{}.{}.{}:{}",
           knx_gateway_ip[0], knx_gateway_ip[1], knx_gateway_ip[2], knx_gateway_ip[3], knx_gateway_port);
 
     // Allocate buffers for KNX client using the new KnxBuffers struct
@@ -244,11 +229,11 @@ async fn main(spawner: Spawner) {
         .unwrap();
 
     // Connect to gateway
-    info!("Attempting to connect...");
+    pico_log!(info, "Attempting to connect...");
     match client.connect().await {
-        Ok(_) => info!("✓ Connected to KNX gateway!"),
+        Ok(_) => pico_log!(info, "✓ Connected to KNX gateway!"),
         Err(_) => {
-            error!("✗ Failed to connect to KNX gateway");
+            pico_log!(error, "✗ Failed to connect to KNX gateway");
             loop {
                 Timer::after(Duration::from_secs(10)).await;
             }
@@ -266,41 +251,41 @@ async fn main(spawner: Spawner) {
     // use knx_rs::{knx_write, KnxValue};
     // knx_write!(client, 1/2/3, KnxValue::Bool(true)).await?;
 
-    info!("Sending test: bool=true to 1/2/3");
+    pico_log!(info, "Sending test: bool=true to 1/2/3");
     match client.write(light_addr, KnxValue::Bool(true)).await {
         Ok(_) => {
-            info!("✓ Command sent successfully (fire-and-forget)");
+            pico_log!(info, "✓ Command sent successfully (fire-and-forget)");
         }
         Err(_) => {
-            error!("✗ Failed to send command");
+            pico_log!(error, "✗ Failed to send command");
         }
     }
 
     // Wait before next command
-    info!("Waiting 1 second before next command...");
+    pico_log!(info, "Waiting 1 second before next command...");
     Timer::after(Duration::from_secs(1)).await;
 
-    info!("Sending test: bool=false to 1/2/3");
+    pico_log!(info, "Sending test: bool=false to 1/2/3");
     match client.write(light_addr, KnxValue::Bool(false)).await {
         Ok(_) => {
-            info!("✓ Command sent successfully (fire-and-forget)");
+            pico_log!(info, "✓ Command sent successfully (fire-and-forget)");
         }
         Err(_) => {
-            error!("✗ Failed to send command");
-            error!("Connection may be lost, attempting reconnection...");
+            pico_log!(error, "✗ Failed to send command");
+            pico_log!(error, "Connection may be lost, attempting reconnection...");
 
             // Try to reconnect
             match client.connect().await {
                 Ok(_) => {
-                    info!("✓ Reconnected to KNX gateway!");
+                    pico_log!(info, "✓ Reconnected to KNX gateway!");
                     // Retry the command
                     if let Ok(_) = client.write(light_addr, KnxValue::Bool(false)).await {
-                        info!("✓ Command sent successfully after reconnection");
+                        pico_log!(info, "✓ Command sent successfully after reconnection");
                     }
                 }
                 Err(_) => {
-                    error!("✗ Failed to reconnect");
-                    error!("System will continue but may be unstable");
+                    pico_log!(error, "✗ Failed to reconnect");
+                    pico_log!(error, "System will continue but may be unstable");
                 }
             }
         }
@@ -319,19 +304,19 @@ async fn main(spawner: Spawner) {
     // use a different approach that doesn't require polling recv_from().
     // ========================================================================
 
-    info!("✓ Test commands sent successfully!");
-    info!("System is now idle (event listening disabled to prevent crash)");
-    info!("To test more commands, reset the device and modify main.rs");
+    pico_log!(info, "✓ Test commands sent successfully!");
+    pico_log!(info, "System is now idle (event listening disabled to prevent crash)");
+    pico_log!(info, "To test more commands, reset the device and modify main.rs");
 
     // Idle loop - just blink LED and wait
     loop {
         Timer::after(Duration::from_secs(10)).await;
-        info!("System still running... (idle mode)");
+        pico_log!(info, "System still running... (idle mode)");
     }
 
     // DISABLED CODE - causes crash on Pico 2 W
     /*
-    info!("Listening for KNX bus events...");
+    pico_log!(info, "Listening for KNX bus events...");
     loop {
         match client.receive_event().await {
             Ok(Some(event)) => {
@@ -340,7 +325,7 @@ async fn main(spawner: Spawner) {
                         let (main, middle, sub) = format_group_address(address);
                         match value {
                             KnxValue::Bool(on) => {
-                                info!(
+                                pico_log!(info, 
                                     "💡 Switch {}/{}/{}: {}",
                                     main,
                                     middle,
@@ -349,7 +334,7 @@ async fn main(spawner: Spawner) {
                                 );
                             }
                             KnxValue::Percent(p) => {
-                                info!(
+                                pico_log!(info, 
                                     "📊 Dimmer {}/{}/{}: {}%",
                                     main,
                                     middle,
@@ -358,7 +343,7 @@ async fn main(spawner: Spawner) {
                                 );
                             }
                             KnxValue::U8(v) => {
-                                info!(
+                                pico_log!(info, 
                                     "🔢 U8 {}/{}/{}: {}",
                                     main,
                                     middle,
@@ -367,7 +352,7 @@ async fn main(spawner: Spawner) {
                                 );
                             }
                             KnxValue::U16(v) => {
-                                info!(
+                                pico_log!(info, 
                                     "🔢 U16 {}/{}/{}: {}",
                                     main,
                                     middle,
@@ -379,7 +364,7 @@ async fn main(spawner: Spawner) {
                                 let temp_int = (t * 10.0) as i32;
                                 let whole = temp_int / 10;
                                 let frac = (temp_int % 10).abs();
-                                info!(
+                                pico_log!(info, 
                                     "🌡️  Temperature {}/{}/{}: {}.{}°C",
                                     main,
                                     middle,
@@ -392,7 +377,7 @@ async fn main(spawner: Spawner) {
                                 let val_int = (v * 10.0) as i32;
                                 let whole = val_int / 10;
                                 let frac = (val_int % 10).abs();
-                                info!(
+                                pico_log!(info, 
                                     "💡 Lux {}/{}/{}: {}.{} lx",
                                     main,
                                     middle,
@@ -405,7 +390,7 @@ async fn main(spawner: Spawner) {
                                 let hum_int = (h * 10.0) as i32;
                                 let whole = hum_int / 10;
                                 let frac = (hum_int % 10).abs();
-                                info!(
+                                pico_log!(info, 
                                     "💧 Humidity {}/{}/{}: {}.{}%",
                                     main,
                                     middle,
@@ -418,7 +403,7 @@ async fn main(spawner: Spawner) {
                                 let ppm_int = (p * 10.0) as i32;
                                 let whole = ppm_int / 10;
                                 let frac = (ppm_int % 10).abs();
-                                info!(
+                                pico_log!(info, 
                                     "🌫️  PPM {}/{}/{}: {}.{} ppm",
                                     main,
                                     middle,
@@ -431,7 +416,7 @@ async fn main(spawner: Spawner) {
                                 let val_int = (f * 10.0) as i32;
                                 let whole = val_int / 10;
                                 let frac = (val_int % 10).abs();
-                                info!(
+                                pico_log!(info, 
                                     "📈 Float {}/{}/{}: {}.{}",
                                     main,
                                     middle,
@@ -441,32 +426,32 @@ async fn main(spawner: Spawner) {
                                 );
                             }
                             KnxValue::Control3Bit { .. } => {
-                                info!("🎛️  Control3Bit {}/{}/{}", main, middle, sub);
+                                pico_log!(info, "🎛️  Control3Bit {}/{}/{}", main, middle, sub);
                             }
                             KnxValue::Time { .. } => {
-                                info!("🕐 Time {}/{}/{}", main, middle, sub);
+                                pico_log!(info, "🕐 Time {}/{}/{}", main, middle, sub);
                             }
                             KnxValue::Date { .. } => {
-                                info!("📅 Date {}/{}/{}", main, middle, sub);
+                                pico_log!(info, "📅 Date {}/{}/{}", main, middle, sub);
                             }
                             KnxValue::StringAscii { .. } => {
-                                info!("📝 String {}/{}/{}", main, middle, sub);
+                                pico_log!(info, "📝 String {}/{}/{}", main, middle, sub);
                             }
                             KnxValue::DateTime { .. } => {
-                                info!("🕐📅 DateTime {}/{}/{}", main, middle, sub);
+                                pico_log!(info, "🕐📅 DateTime {}/{}/{}", main, middle, sub);
                             }
                         }
                     }
                     KnxEvent::GroupRead { address } => {
                         let (main, middle, sub) = format_group_address(address);
-                        info!("📖 Value read request from {}/{}/{}", main, middle, sub);
+                        pico_log!(info, "📖 Value read request from {}/{}/{}", main, middle, sub);
                     }
                     KnxEvent::GroupResponse { address, value } => {
                         let (main, middle, sub) = format_group_address(address);
                         // Use same formatting as GroupWrite
                         match value {
                             KnxValue::Bool(on) => {
-                                info!(
+                                pico_log!(info, 
                                     "📬 Response {}/{}/{}: {}",
                                     main,
                                     middle,
@@ -475,20 +460,20 @@ async fn main(spawner: Spawner) {
                                 );
                             }
                             KnxValue::Percent(p) => {
-                                info!("📬 Response {}/{}/{}: {}%", main, middle, sub, p);
+                                pico_log!(info, "📬 Response {}/{}/{}: {}%", main, middle, sub, p);
                             }
                             KnxValue::U8(v) => {
-                                info!("📬 Response {}/{}/{}: {} (U8)", main, middle, sub, v);
+                                pico_log!(info, "📬 Response {}/{}/{}: {} (U8)", main, middle, sub, v);
                             }
                             KnxValue::U16(v) => {
-                                info!("📬 Response {}/{}/{}: {} (U16)", main, middle, sub, v);
+                                pico_log!(info, "📬 Response {}/{}/{}: {} (U16)", main, middle, sub, v);
                             }
                             KnxValue::Temperature(t) | KnxValue::Lux(t) | KnxValue::Humidity(t)
                             | KnxValue::Ppm(t) | KnxValue::Float2(t) => {
                                 let val_int = (t * 10.0) as i32;
                                 let whole = val_int / 10;
                                 let frac = (val_int % 10).abs();
-                                info!(
+                                pico_log!(info, 
                                     "📬 Response {}/{}/{}: {}.{} (Float)",
                                     main,
                                     middle,
@@ -499,13 +484,13 @@ async fn main(spawner: Spawner) {
                             }
                             KnxValue::Control3Bit { .. } | KnxValue::Time { .. } | KnxValue::Date { .. }
                             | KnxValue::StringAscii { .. } | KnxValue::DateTime { .. } => {
-                                info!("📬 Response {}/{}/{}: (complex type)", main, middle, sub);
+                                pico_log!(info, "📬 Response {}/{}/{}: (complex type)", main, middle, sub);
                             }
                         }
                     }
                     KnxEvent::Unknown { address, data_len } => {
                         let (main, middle, sub) = format_group_address(address);
-                        info!("❓ Unknown event at {}/{}/{} ({} bytes)", main, middle, sub, data_len);
+                        pico_log!(info, "❓ Unknown event at {}/{}/{} ({} bytes)", main, middle, sub, data_len);
                     }
                 }
             }
@@ -514,7 +499,7 @@ async fn main(spawner: Spawner) {
                 // This is normal, just continue listening
             }
             Err(_) => {
-                error!("❌ Receive error, continuing...");
+                pico_log!(error, "❌ Receive error, continuing...");
                 // Add delay to prevent tight error loop
                 Timer::after(Duration::from_millis(1000)).await;
             }
