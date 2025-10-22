@@ -1,6 +1,15 @@
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 #![expect(dead_code, reason = "Library under development, not all items used yet")]
 #![doc = include_str!("../README.md")]
+// Clippy configuration
+#![allow(clippy::doc_markdown)] // Many KNX terms don't need backticks
+#![allow(clippy::match_same_arms)] // Intentional for exhaustiveness in DPT types
+#![allow(clippy::trivially_copy_pass_by_ref)] // Consistent API across DPT types
+#![allow(clippy::unused_self)] // Some methods are intentionally associated
+#![allow(clippy::allow_attributes_without_reason)] // Will be addressed incrementally
+#![allow(clippy::undocumented_unsafe_blocks)] // Performance-critical unsafe blocks
+#![allow(clippy::map_err_ignore)] // Error context not always needed
+#![allow(clippy::fn_params_excessive_bools)] // Legacy API, will refactor later
 
 //! # knx-rs
 //!
