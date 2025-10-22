@@ -1,6 +1,6 @@
 [package]
 name = "knx-pico"
-version = "0.1.3"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Cristiano Chieppa"]
@@ -12,8 +12,6 @@ keywords = ["knx", "knxnet-ip", "embedded", "no-std", "home-automation"]
 categories = ["embedded", "no-std", "network-programming"]
 exclude = [
     "src/main.rs",
-    "src/knx_client.rs",
-    "src/knx_discovery.rs",
     "src/configuration.rs",
     "src/configuration.rs.example",
     "examples/",
