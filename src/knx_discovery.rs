@@ -18,7 +18,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_pico::knx_discovery::discover_gateway;
+//! use crate::knx_discovery::discover_gateway;
 //!
 //! // Discover first available gateway (3 second timeout)
 //! if let Some(gateway) = discover_gateway(&stack, Duration::from_secs(3)).await {

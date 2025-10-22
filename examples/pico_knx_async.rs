@@ -36,7 +36,7 @@
 
 mod common;
 
-use common::knx_discovery;
+use knx_pico::knx_discovery;
 use common::utility::{get_ssid, get_wifi_password};
 use defmt::unwrap;
 use embassy_executor::Spawner;
