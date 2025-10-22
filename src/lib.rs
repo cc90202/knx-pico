@@ -48,6 +48,12 @@ pub mod macros;
 #[macro_use]
 pub mod logging;
 
+// Embassy-based client modules (requires embassy-rp or embassy-rp-usb feature)
+#[cfg(any(feature = "embassy-rp", feature = "embassy-rp-usb"))]
+pub mod knx_client;
+#[cfg(any(feature = "embassy-rp", feature = "embassy-rp-usb"))]
+pub mod knx_discovery;
+
 
 // Re-export commonly used types
 #[doc(inline)]
@@ -58,3 +64,8 @@ pub use dpt::{Dpt1, Dpt5, Dpt9, DptDecode, DptEncode};
 pub use error::{KnxError, Result};
 #[doc(inline)]
 pub use net::Ipv4Addr;
+
+// Re-export client types when embassy features are enabled
+#[cfg(any(feature = "embassy-rp", feature = "embassy-rp-usb"))]
+#[doc(inline)]
+pub use knx_client::KnxClient;
