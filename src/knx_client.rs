@@ -2128,7 +2128,7 @@ mod tests {
     #[test]
     fn test_dpt16_length_clamping() {
         // Test that strings > 14 characters get clamped
-        let mut data = [b'A'; 14];
+        let data = [b'A'; 14];
         let value = KnxValue::StringAscii { data, len: 20 }; // len > 14
 
         let mut buffer = [0u8; 32];

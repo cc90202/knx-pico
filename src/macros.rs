@@ -80,7 +80,7 @@ macro_rules! ga {
         };
 
         // Calculate raw address: MMMMMMMM MMMMSSSSSSSSS (5 bits main, 3 bits middle, 8 bits sub)
-        const RAW: u16 = (($main as u16 & 0x1F) << 11) | (($middle as u16 & 0x07) << 8) | ($sub as u16 & 0xFF);
+        const RAW: u16 = (($main & 0x1F) << 11) | (($middle & 0x07) << 8) | ($sub & 0xFF);
         $crate::addressing::GroupAddress::from(RAW)
     }};
 }

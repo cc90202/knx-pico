@@ -2,12 +2,6 @@
 #![no_main]
 #![allow(dead_code)]
 
-// Declare modules for the binary target
-pub mod configuration;
-pub mod utility;
-pub mod knx_client;
-pub mod knx_discovery;
-
 mod common;
 
 use common::utility::*;

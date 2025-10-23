@@ -52,6 +52,29 @@ macro_rules! pico_log {
     (trace, $($arg:tt)*) => { log::trace!($($arg)*) };
 }
 
+/// Logging macro that automatically selects the right backend.
+///
+/// Uses `defmt` when the `usb-logger` feature is disabled (default for RP2040),
+/// or `log` when the `usb-logger` feature is enabled.
+///
+/// # Syntax
+///
+/// ```ignore
+/// pico_log!(level, format_string, args...)
+/// ```
+///
+/// Supported levels: `trace`, `debug`, `info`, `warn`, `error`
+///
+/// # Examples
+///
+/// ```ignore
+/// pico_log!(info, "Starting application");
+/// pico_log!(debug, "Counter value: {}", counter);
+///
+/// // Different log levels
+/// pico_log!(trace, "Entering critical section");
+/// pico_log!(error, "Connection failed: {}", error);
+/// ```
 #[macro_export]
 #[cfg(not(feature = "usb-logger"))]
 macro_rules! pico_log {
