@@ -14,6 +14,11 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
+    // Skip build script when building docs on docs.rs
+    if env::var_os("DOCS_RS").is_some() {
+        return;
+    }
+
     // Put `memory.x` in our output directory and ensure it's
     // on the linker search path.
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
