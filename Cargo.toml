@@ -11,10 +11,6 @@ readme = "README.md"
 keywords = ["knx", "knxnet-ip", "embedded", "no-std", "home-automation"]
 categories = ["embedded", "no-std", "network-programming"]
 exclude = [
-    "src/main.rs",
-    "src/configuration.rs",
-    "build.rs",
-    "memory.x",
     "test_runner.py",
     "check-all.sh",
     ".github/",
