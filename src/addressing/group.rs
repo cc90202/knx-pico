@@ -150,17 +150,29 @@ impl GroupAddress {
     }
 
     /// Format as 3-level string (Main/Middle/Sub).
+    ///
+    /// # Panics
+    ///
+    /// May panic if the formatted string exceeds 16 bytes capacity, though this
+    /// should never occur in practice as the maximum length is "31/7/255" (9 bytes).
     pub fn to_string_3level(&self) -> heapless::String<16> {
         use core::fmt::Write;
         let mut s = heapless::String::new();
+        // Ignoring error is safe: max string is "31/7/255" = 9 bytes < 16 capacity
         let _ = write!(s, "{}/{}/{}", self.main(), self.middle(), self.sub());
         s
     }
 
     /// Format as 2-level string (Main/Sub).
+    ///
+    /// # Panics
+    ///
+    /// May panic if the formatted string exceeds 16 bytes capacity, though this
+    /// should never occur in practice as the maximum length is "31/2047" (8 bytes).
     pub fn to_string_2level(&self) -> heapless::String<16> {
         use core::fmt::Write;
         let mut s = heapless::String::new();
+        // Ignoring error is safe: max string is "31/2047" = 8 bytes < 16 capacity
         let _ = write!(s, "{}/{}", self.main(), self.sub_2level());
         s
     }

@@ -458,7 +458,9 @@ impl<'a> LDataFrame<'a> {
 
         // For data frames, parse APCI
         let (apci, data_start) = if tpci.is_data() {
-            // SAFETY: We already checked data.len() >= MIN_SIZE (9) at line 385
+            // SAFETY: Bounds checked above - data.len() >= MIN_SIZE = 9.
+            // Index 8 is within bounds (< 9). Using get_unchecked avoids redundant
+            // bounds check in this hot path for KNX frame processing.
             let apci = Apci::from_bytes(tpci_byte, unsafe { *data.get_unchecked(8) });
             (apci, 9)
         } else {
@@ -562,7 +564,9 @@ impl<'a> CEMIFrame<'a> {
     /// Get additional info length
     #[inline(always)]
     pub fn additional_info_length(&self) -> u8 {
-        // SAFETY: parse() guarantees data.len() >= MIN_SIZE (2)
+        // SAFETY: parse() guarantees data.len() >= MIN_SIZE = 2 during construction.
+        // Index 1 is always valid (< 2). This eliminates bounds checking for a
+        // frequently called accessor method in cEMI frame processing.
         unsafe { *self.data.get_unchecked(1) }
     }
 

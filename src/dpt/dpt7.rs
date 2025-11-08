@@ -164,8 +164,10 @@ impl Dpt7 {
             return Err(KnxError::invalid_dpt_data());
         }
 
-        // SAFETY: We just validated that data.len() >= 2
-        // This eliminates redundant bounds checks
+        // SAFETY: Bounds checked above - data.len() >= 2 is guaranteed.
+        // Indices 0 and 1 are both < 2, therefore within bounds.
+        // Using get_unchecked eliminates redundant bounds checks in DPT decoding,
+        // providing performance benefit for frequent value conversions in KNX communication.
         let bytes = unsafe {
             [
                 *data.get_unchecked(0),

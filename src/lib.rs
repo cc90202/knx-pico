@@ -7,7 +7,6 @@
 #![allow(clippy::trivially_copy_pass_by_ref)] // Consistent API across DPT types
 #![allow(clippy::unused_self)] // Some methods are intentionally associated
 #![allow(clippy::allow_attributes_without_reason)] // Will be addressed incrementally
-#![allow(clippy::undocumented_unsafe_blocks)] // Performance-critical unsafe blocks
 #![allow(clippy::map_err_ignore)] // Error context not always needed
 #![allow(clippy::fn_params_excessive_bools)] // Legacy API, will refactor later
 
