@@ -17,39 +17,40 @@
 //! ```rust,no_run
 //! use knx_pico::dpt::{Dpt1, Dpt3, Dpt5, Dpt7, Dpt9, Dpt13, StepCode, DptEncode, DptDecode};
 //!
-//! // Boolean value - uses encode() returning &'static [u8]
-//! let data = Dpt1::Switch.encode(true)?;
-//! let value = Dpt1::Switch.decode(&data)?;
+//! // All DPT types now use the same pattern: encode to buffer, decode from slice
+//! let mut buf = [0u8; 4];
 //!
-//! // For multi-byte types, use specific methods:
+//! // Boolean value (1 byte)
+//! let len = Dpt1::Switch.encode(true, &mut buf)?;
+//! let value = Dpt1::Switch.decode(&buf[..len])?;
 //!
-//! // 3-bit controlled (dimming/blind) - returns owned byte
-//! let byte = Dpt3::Dimming.encode_to_byte(true, StepCode::Intervals4)?;
-//! let cmd = Dpt3::Dimming.decode(&[byte])?;
+//! // 3-bit controlled dimming/blind (1 byte)
+//! let len = Dpt3::Dimming.encode((true, StepCode::Intervals4), &mut buf)?;
+//! let cmd = Dpt3::Dimming.decode(&buf[..len])?;
 //!
-//! // Percentage (0-100%) - returns owned byte
-//! let byte = Dpt5::Percentage.encode_to_byte(75)?;
-//! let value = Dpt5::Percentage.decode(&[byte])?;
+//! // Percentage 0-100% (1 byte)
+//! let len = Dpt5::Percentage.encode(75, &mut buf)?;
+//! let value = Dpt5::Percentage.decode(&buf[..len])?;
 //!
-//! // Brightness (lux) - returns owned array
-//! let bytes = Dpt7::Brightness.encode_to_bytes(5000)?;
-//! let lux = Dpt7::Brightness.decode(&bytes)?;
+//! // Brightness in lux (2 bytes)
+//! let len = Dpt7::Brightness.encode(5000, &mut buf)?;
+//! let lux = Dpt7::Brightness.decode(&buf[..len])?;
 //!
-//! // Temperature (°C) - returns owned array
-//! let bytes = Dpt9::Temperature.encode_to_bytes(21.5)?;
-//! let temp = Dpt9::Temperature.decode_from_bytes(&bytes)?;
+//! // Temperature in °C (2 bytes)
+//! let len = Dpt9::Temperature.encode(21.5, &mut buf)?;
+//! let temp = Dpt9::Temperature.decode(&buf[..len])?;
 //!
-//! // Active energy (Wh) - returns owned array
-//! let bytes = Dpt13::ActiveEnergy.encode_to_bytes(500000)?;
-//! let wh = Dpt13::ActiveEnergy.decode(&bytes)?;
+//! // Active energy in Wh (4 bytes)
+//! let len = Dpt13::ActiveEnergy.encode(500000, &mut buf)?;
+//! let wh = Dpt13::ActiveEnergy.decode(&buf[..len])?;
 //! ```
 //!
 //! ## Design Note
 //!
-//! The `DptEncode` trait returns `&'static [u8]` which works well for simple
-//! types (like DPT1 with only 2 possible values), but not for types with many
-//! possible values. For those, use the type-specific `encode_to_byte()` or
-//! `encode_to_bytes()` methods that return owned data.
+//! The `DptEncode` trait accepts an output buffer and returns the number of bytes written.
+//! This design allows all DPT types to implement the trait consistently without requiring
+//! static allocations for every possible value, solving the Liskov Substitution Principle
+//! violation that existed in the previous `&'static [u8]` design.
 
 use crate::error::Result;
 
@@ -76,23 +77,23 @@ pub use dpt13::Dpt13;
 
 /// Trait for encoding values to KNX data format
 ///
-/// This trait is mainly for documentation and type checking.
-/// Actual encoding should use the type-specific methods like
-/// `encode_to_byte()`, `encode_to_bytes()`, etc.
+/// This trait accepts an output buffer and returns the number of bytes written.
+/// This design allows all DPT types to implement the trait consistently without
+/// requiring static allocations for all possible values.
 pub trait DptEncode<T> {
     /// Encode a value to KNX byte representation
     ///
     /// # Arguments
     /// * `value` - The value to encode
+    /// * `buf` - Output buffer to write the encoded bytes
     ///
     /// # Returns
-    /// A byte array containing the encoded value
+    /// The number of bytes written to the buffer
     ///
-    /// # Note
-    /// This method may not be implemented for all DPT types due to
-    /// the limitation of returning `&'static [u8]`. Use type-specific
-    /// methods like `encode_to_byte()` or `encode_to_bytes()` instead.
-    fn encode(&self, value: T) -> Result<&'static [u8]>;
+    /// # Errors
+    /// Returns `BufferTooSmall` if the buffer is not large enough for the encoded data
+    /// Returns `DptValueOutOfRange` if the value is outside the valid range
+    fn encode(&self, value: T, buf: &mut [u8]) -> Result<usize>;
 }
 
 /// Trait for decoding KNX data to values

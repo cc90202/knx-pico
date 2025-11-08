@@ -21,14 +21,17 @@
 //! ```rust,no_run
 //! use knx_pico::dpt::{Dpt5, DptEncode, DptDecode};
 //!
+//! let mut buf = [0u8; 1];
+//!
 //! // Encode percentage (0-100%)
-//! let data = Dpt5::Percentage.encode(75)?;  // [0xBF] = 191
+//! let len = Dpt5::Percentage.encode(75, &mut buf)?;  // len = 1, buf = [0xBF] = 191
 //!
 //! // Decode
-//! let value = Dpt5::Percentage.decode(&[0xBF])?;  // 75
+//! let value = Dpt5::Percentage.decode(&buf[..len])?;  // 75
 //!
 //! // Angle (0-360°)
-//! let data = Dpt5::Angle.encode(180)?;  // [0x80] = 128
+//! let len = Dpt5::Angle.encode(180, &mut buf)?;  // len = 1, buf = [0x80] = 128
+//! let angle = Dpt5::Angle.decode(&buf[..len])?;  // 180
 //! ```
 
 use crate::error::{KnxError, Result};
@@ -154,12 +157,13 @@ impl Dpt5 {
 }
 
 impl DptEncode<u16> for Dpt5 {
-    fn encode(&self, _value: u16) -> Result<&'static [u8]> {
-        // We can't use static arrays for all possible values,
-        // so we'll return an error and let the caller handle the byte.
-        // This is a limitation of the current trait design.
-        // Use encode_to_byte() instead.
-        Err(KnxError::UnsupportedOperation)
+    fn encode(&self, value: u16, buf: &mut [u8]) -> Result<usize> {
+        if buf.is_empty() {
+            return Err(KnxError::buffer_too_small());
+        }
+
+        buf[0] = self.encode_scaled(value)?;
+        Ok(1)
     }
 }
 
@@ -173,24 +177,6 @@ impl DptDecode<u16> for Dpt5 {
     }
 }
 
-impl Dpt5 {
-    /// Encode a value to a byte
-    ///
-    /// This is a convenience method that returns the encoded byte directly.
-    /// Use this instead of the trait method.
-    ///
-    /// # Arguments
-    /// * `value` - The value to encode
-    ///
-    /// # Returns
-    /// The encoded byte value
-    ///
-    /// # Errors
-    /// Returns `DptValueOutOfRange` if value is outside valid range
-    pub fn encode_to_byte(&self, value: u16) -> Result<u8> {
-        self.encode_scaled(value)
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -198,18 +184,27 @@ mod tests {
 
     #[test]
     fn test_percentage_encode() {
+        let mut buf = [0u8; 1];
+
         // 0% -> 0
-        assert_eq!(Dpt5::Percentage.encode_to_byte(0).unwrap(), 0x00);
+        let len = Dpt5::Percentage.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0x00);
 
         // 50% -> 127 (128 would be closer but integer division)
-        let val = Dpt5::Percentage.encode_to_byte(50).unwrap();
-        assert!(val >= 127 && val <= 128);
+        let len = Dpt5::Percentage.encode(50, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert!(buf[0] >= 127 && buf[0] <= 128);
 
         // 100% -> 255
-        assert_eq!(Dpt5::Percentage.encode_to_byte(100).unwrap(), 0xFF);
+        let len = Dpt5::Percentage.encode(100, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0xFF);
 
         // 75% -> 191
-        assert_eq!(Dpt5::Percentage.encode_to_byte(75).unwrap(), 0xBF);
+        let len = Dpt5::Percentage.encode(75, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0xBF);
     }
 
     #[test]
@@ -231,22 +226,30 @@ mod tests {
 
     #[test]
     fn test_percentage_out_of_range() {
-        let result = Dpt5::Percentage.encode_to_byte(101);
+        let mut buf = [0u8; 1];
+        let result = Dpt5::Percentage.encode(101, &mut buf);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), KnxError::Dpt(_)));
     }
 
     #[test]
     fn test_angle_encode() {
+        let mut buf = [0u8; 1];
+
         // 0° -> 0
-        assert_eq!(Dpt5::Angle.encode_to_byte(0).unwrap(), 0x00);
+        let len = Dpt5::Angle.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0x00);
 
         // 180° -> 127
-        let val = Dpt5::Angle.encode_to_byte(180).unwrap();
-        assert!(val >= 127 && val <= 128);
+        let len = Dpt5::Angle.encode(180, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert!(buf[0] >= 127 && buf[0] <= 128);
 
         // 360° -> 255
-        assert_eq!(Dpt5::Angle.encode_to_byte(360).unwrap(), 0xFF);
+        let len = Dpt5::Angle.encode(360, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0xFF);
     }
 
     #[test]
@@ -264,15 +267,26 @@ mod tests {
 
     #[test]
     fn test_angle_out_of_range() {
-        let result = Dpt5::Angle.encode_to_byte(361);
+        let mut buf = [0u8; 1];
+        let result = Dpt5::Angle.encode(361, &mut buf);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_percent_u8_encode() {
-        assert_eq!(Dpt5::PercentU8.encode_to_byte(0).unwrap(), 0);
-        assert_eq!(Dpt5::PercentU8.encode_to_byte(128).unwrap(), 128);
-        assert_eq!(Dpt5::PercentU8.encode_to_byte(255).unwrap(), 255);
+        let mut buf = [0u8; 1];
+
+        let len = Dpt5::PercentU8.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0);
+
+        let len = Dpt5::PercentU8.encode(128, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 128);
+
+        let len = Dpt5::PercentU8.encode(255, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 255);
     }
 
     #[test]
@@ -284,15 +298,26 @@ mod tests {
 
     #[test]
     fn test_tariff_encode() {
-        assert_eq!(Dpt5::Tariff.encode_to_byte(0).unwrap(), 0);
-        assert_eq!(Dpt5::Tariff.encode_to_byte(100).unwrap(), 100);
-        assert_eq!(Dpt5::Tariff.encode_to_byte(254).unwrap(), 254);
+        let mut buf = [0u8; 1];
+
+        let len = Dpt5::Tariff.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0);
+
+        let len = Dpt5::Tariff.encode(100, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 100);
+
+        let len = Dpt5::Tariff.encode(254, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 254);
     }
 
     #[test]
     fn test_tariff_out_of_range() {
+        let mut buf = [0u8; 1];
         // Tariff max is 254
-        let result = Dpt5::Tariff.encode_to_byte(255);
+        let result = Dpt5::Tariff.encode(255, &mut buf);
         assert!(result.is_err());
     }
 
@@ -305,9 +330,19 @@ mod tests {
 
     #[test]
     fn test_counter_encode() {
-        assert_eq!(Dpt5::Counter.encode_to_byte(0).unwrap(), 0);
-        assert_eq!(Dpt5::Counter.encode_to_byte(42).unwrap(), 42);
-        assert_eq!(Dpt5::Counter.encode_to_byte(255).unwrap(), 255);
+        let mut buf = [0u8; 1];
+
+        let len = Dpt5::Counter.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0);
+
+        let len = Dpt5::Counter.encode(42, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 42);
+
+        let len = Dpt5::Counter.encode(255, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 255);
     }
 
     #[test]
@@ -326,9 +361,11 @@ mod tests {
 
     #[test]
     fn test_round_trip_percentage() {
+        let mut buf = [0u8; 1];
         for value in [0, 25, 50, 75, 100] {
-            let encoded = Dpt5::Percentage.encode_to_byte(value).unwrap();
-            let decoded = Dpt5::Percentage.decode(&[encoded]).unwrap();
+            let len = Dpt5::Percentage.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 1);
+            let decoded = Dpt5::Percentage.decode(&buf[..len]).unwrap();
             // Allow ±1 error due to rounding
             assert!((decoded as i16 - value as i16).abs() <= 1);
         }
@@ -336,9 +373,11 @@ mod tests {
 
     #[test]
     fn test_round_trip_angle() {
+        let mut buf = [0u8; 1];
         for value in [0, 90, 180, 270, 360] {
-            let encoded = Dpt5::Angle.encode_to_byte(value).unwrap();
-            let decoded = Dpt5::Angle.decode(&[encoded]).unwrap();
+            let len = Dpt5::Angle.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 1);
+            let decoded = Dpt5::Angle.decode(&buf[..len]).unwrap();
             // Allow ±2 error due to rounding
             assert!((decoded as i16 - value as i16).abs() <= 2);
         }
