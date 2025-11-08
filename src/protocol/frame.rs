@@ -126,15 +126,21 @@ impl KnxnetIpHeader {
             return Err(KnxError::buffer_too_small());
         }
 
-        // SAFETY: We just checked the length above
-        // Using unsafe get_unchecked for ~10% speed improvement
+        // SAFETY: Bounds checked above (data.len() >= Self::SIZE = 6).
+        // All indices [0..5] are guaranteed valid. Using get_unchecked eliminates
+        // redundant bounds checks in hot path, providing ~10% performance gain.
+        // This is critical for embedded systems where frame parsing happens
+        // for every KNX message (potentially 100s per second).
         let header_length = unsafe { *data.get_unchecked(0) };
+        // SAFETY: Same as above - index 1 < 6 is within bounds.
         let protocol_version = unsafe { *data.get_unchecked(1) };
 
         // Load as u16 in one operation (compiler will optimize to single load)
+        // SAFETY: Indices 2 and 3 are both < 6, within checked bounds.
         let service_type_raw = u16::from_be_bytes([unsafe { *data.get_unchecked(2) }, unsafe {
             *data.get_unchecked(3)
         }]);
+        // SAFETY: Indices 4 and 5 are both < 6, within checked bounds.
         let total_length = u16::from_be_bytes([unsafe { *data.get_unchecked(4) }, unsafe {
             *data.get_unchecked(5)
         }]);
@@ -249,7 +255,11 @@ impl<'a> KnxnetIpFrame<'a> {
     pub fn body(&self) -> &[u8] {
         let start = KnxnetIpHeader::SIZE;
         let end = self.header.total_length as usize;
-        // SAFETY: We validated the length in parse()
+        // SAFETY: Length validated in parse() - checked that data.len() >= header.total_length.
+        // The range start..end is guaranteed valid because:
+        // - start = 6 (header size)
+        // - end = total_length (validated <= data.len())
+        // Therefore start..end is within bounds of self.data.
         unsafe { self.data.get_unchecked(start..end) }
     }
 
@@ -258,7 +268,8 @@ impl<'a> KnxnetIpFrame<'a> {
     /// Returns the entire frame including header.
     #[inline(always)]
     pub fn data(&self) -> &[u8] {
-        // SAFETY: We validated the length in parse()
+        // SAFETY: Length validated in parse() - checked that data.len() >= header.total_length.
+        // The range ..total_length is guaranteed valid because total_length <= data.len().
         unsafe { self.data.get_unchecked(..self.header.total_length as usize) }
     }
 }
