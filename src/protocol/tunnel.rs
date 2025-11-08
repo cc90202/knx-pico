@@ -42,7 +42,10 @@
 use crate::error::{KnxError, Result};
 use crate::protocol::constants::MAX_FRAME_SIZE;
 use crate::protocol::frame::Hpai;
-use crate::protocol::services::{ConnectRequest, ConnectResponse, ConnectionHeader, TunnelingRequest, TunnelingAck, ConnectionStateRequest, ConnectionStateResponse, DisconnectRequest};
+use crate::protocol::services::{
+    ConnectRequest, ConnectResponse, ConnectionHeader, ConnectionStateRequest,
+    ConnectionStateResponse, DisconnectRequest, TunnelingAck, TunnelingRequest,
+};
 
 /// Maximum buffer size for frames
 const BUFFER_SIZE: usize = MAX_FRAME_SIZE;
@@ -307,10 +310,7 @@ impl TunnelClient<Connecting> {
     /// let client = client.handle_connect_response(&response_data)?;
     /// // Now client is in Connected state!
     /// ```
-    pub fn handle_connect_response(
-        self,
-        response: &[u8],
-    ) -> Result<TunnelClient<Connected>> {
+    pub fn handle_connect_response(self, response: &[u8]) -> Result<TunnelClient<Connected>> {
         let resp = ConnectResponse::parse(response)?;
 
         if !resp.is_ok() {
@@ -390,10 +390,7 @@ impl TunnelClient<Connected> {
     /// // send frame over network...
     /// ```
     pub fn send_tunneling_request(&mut self, cemi_data: &[u8]) -> Result<&[u8]> {
-        let header = ConnectionHeader::new(
-            self.state.channel_id,
-            self.state.send_sequence,
-        );
+        let header = ConnectionHeader::new(self.state.channel_id, self.state.send_sequence);
         let request = TunnelingRequest::new(header, cemi_data);
         let len = request.build(&mut self.tx_buffer)?;
 
@@ -425,10 +422,7 @@ impl TunnelClient<Connected> {
     ///
     /// # Errors
     /// Returns `SequenceMismatch` if sequence counter is wrong
-    pub fn handle_tunneling_indication<'a>(
-        &mut self,
-        body: &'a [u8],
-    ) -> Result<&'a [u8]> {
+    pub fn handle_tunneling_indication<'a>(&mut self, body: &'a [u8]) -> Result<&'a [u8]> {
         let request = TunnelingRequest::parse(body)?;
 
         // Verify sequence counter
@@ -459,10 +453,7 @@ impl TunnelClient<Connected> {
     ///
     /// Used to check if connection is still alive
     pub fn send_heartbeat(&mut self) -> Result<&[u8]> {
-        let request = ConnectionStateRequest::new(
-            self.state.channel_id,
-            self.control_endpoint,
-        );
+        let request = ConnectionStateRequest::new(self.state.channel_id, self.control_endpoint);
         let len = request.build(&mut self.tx_buffer)?;
         Ok(&self.tx_buffer[..len])
     }
@@ -470,10 +461,7 @@ impl TunnelClient<Connected> {
     /// Handle `CONNECTIONSTATE_RESPONSE`
     ///
     /// On error, automatically transitions to Idle
-    pub fn handle_heartbeat_response(
-        self,
-        body: &[u8],
-    ) -> Result<TunnelClient<Connected>> {
+    pub fn handle_heartbeat_response(self, body: &[u8]) -> Result<TunnelClient<Connected>> {
         let response = ConnectionStateResponse::parse(body)?;
 
         if !response.is_ok() {
@@ -496,10 +484,7 @@ impl TunnelClient<Connected> {
     /// // send frame over network...
     /// ```
     pub fn disconnect(mut self) -> Result<TunnelClient<Disconnecting>> {
-        let request = DisconnectRequest::new(
-            self.state.channel_id,
-            self.control_endpoint,
-        );
+        let request = DisconnectRequest::new(self.state.channel_id, self.control_endpoint);
         let len = request.build(&mut self.tx_buffer)?;
 
         // Transition to Disconnecting state
@@ -628,9 +613,7 @@ mod tests {
         let client = client.connect().unwrap();
 
         let response = [
-            0x03, 0x00,
-            0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57,
-            0x04, 0x04, 0x02, 0x00,
+            0x03, 0x00, 0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57, 0x04, 0x04, 0x02, 0x00,
         ];
         let mut client = client.handle_connect_response(&response).unwrap();
 
@@ -650,8 +633,7 @@ mod tests {
         // Error response
         let error_response = [
             0x00, 0x24, // No channel, error status
-            0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57,
-            0x04, 0x04, 0x02, 0x00,
+            0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57, 0x04, 0x04, 0x02, 0x00,
         ];
 
         let result = client.handle_connect_response(&error_response);
@@ -677,9 +659,7 @@ mod tests {
         let client = client.connect().unwrap();
 
         let response = [
-            0x03, 0x00,
-            0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57,
-            0x04, 0x04, 0x02, 0x00,
+            0x03, 0x00, 0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57, 0x04, 0x04, 0x02, 0x00,
         ];
         let mut client = client.handle_connect_response(&response).unwrap();
 
@@ -689,7 +669,9 @@ mod tests {
             0x29, 0x00, 0xBC, 0xE0, // cEMI data
         ];
 
-        let cemi = client.handle_tunneling_indication(&indication_data).unwrap();
+        let cemi = client
+            .handle_tunneling_indication(&indication_data)
+            .unwrap();
         assert_eq!(cemi, &[0x29, 0x00, 0xBC, 0xE0]);
         assert_eq!(client.recv_sequence(), 1);
     }
@@ -700,9 +682,7 @@ mod tests {
         let client = client.connect().unwrap();
 
         let response = [
-            0x03, 0x00,
-            0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57,
-            0x04, 0x04, 0x02, 0x00,
+            0x03, 0x00, 0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57, 0x04, 0x04, 0x02, 0x00,
         ];
         let mut client = client.handle_connect_response(&response).unwrap();
 
@@ -726,17 +706,17 @@ mod tests {
         let client = client.connect().unwrap();
 
         let response = [
-            0x03, 0x00,
-            0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57,
-            0x04, 0x04, 0x02, 0x00,
+            0x03, 0x00, 0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57, 0x04, 0x04, 0x02, 0x00,
         ];
         let mut client = client.handle_connect_response(&response).unwrap();
 
         // Send heartbeat
         let heartbeat_frame = client.send_heartbeat().unwrap();
         assert!(heartbeat_frame.len() >= 16);
-        assert_eq!(u16::from_be_bytes([heartbeat_frame[2], heartbeat_frame[3]]),
-                   SERVICE_CONNECTIONSTATE_REQUEST);
+        assert_eq!(
+            u16::from_be_bytes([heartbeat_frame[2], heartbeat_frame[3]]),
+            SERVICE_CONNECTIONSTATE_REQUEST
+        );
 
         // Handle response
         let hb_response = [0x03, 0x00]; // Channel, Status OK
@@ -752,9 +732,7 @@ mod tests {
         let client = client.connect().unwrap();
 
         let response = [
-            0x03, 0x00,
-            0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57,
-            0x04, 0x04, 0x02, 0x00,
+            0x03, 0x00, 0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57, 0x04, 0x04, 0x02, 0x00,
         ];
         let client = client.handle_connect_response(&response).unwrap();
 
@@ -772,9 +750,7 @@ mod tests {
         let client = client.connect().unwrap();
 
         let response = [
-            0x05, 0x00,
-            0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57,
-            0x04, 0x04, 0x02, 0x00,
+            0x05, 0x00, 0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57, 0x04, 0x04, 0x02, 0x00,
         ];
         let mut client = client.handle_connect_response(&response).unwrap();
 
@@ -797,9 +773,7 @@ mod tests {
         let client = client.connect().unwrap();
 
         let response = [
-            0x03, 0x00,
-            0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57,
-            0x04, 0x04, 0x02, 0x00,
+            0x03, 0x00, 0x08, 0x01, 192, 168, 1, 10, 0x0E, 0x57, 0x04, 0x04, 0x02, 0x00,
         ];
         let client = client.handle_connect_response(&response).unwrap();
 

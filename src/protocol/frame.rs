@@ -47,7 +47,9 @@
 //! - Unsafe optimizations with safety proofs
 
 use crate::error::{KnxError, Result};
-use crate::protocol::constants::{ServiceType, HEADER_SIZE_10, KNXNETIP_VERSION_10, MAX_FRAME_SIZE, IPV4_UDP};
+use crate::protocol::constants::{
+    ServiceType, HEADER_SIZE_10, IPV4_UDP, KNXNETIP_VERSION_10, MAX_FRAME_SIZE,
+};
 
 /// Compiler hint for unlikely branches (error paths)
 #[inline(always)]
@@ -155,8 +157,8 @@ impl KnxnetIpHeader {
             return Err(KnxError::unsupported_version());
         }
 
-        let service_type =
-            ServiceType::from_u16(service_type_raw).ok_or_else(KnxError::unsupported_service_type)?;
+        let service_type = ServiceType::from_u16(service_type_raw)
+            .ok_or_else(KnxError::unsupported_service_type)?;
 
         Ok(Self {
             header_length,

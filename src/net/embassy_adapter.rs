@@ -25,7 +25,7 @@
 
 use crate::error::{KnxError, Result};
 use crate::net::transport::AsyncTransport;
-use crate::net::{Ipv4Addr, IpEndpoint};
+use crate::net::{IpEndpoint, Ipv4Addr};
 use embassy_net::{
     udp::{PacketMetadata, UdpSocket},
     IpAddress, IpEndpoint as EmbassyEndpoint, Stack,
@@ -110,7 +110,6 @@ impl<'a, 'b: 'a> EmbassyUdpTransport<'a, 'b> {
             _phantom: core::marker::PhantomData,
         }
     }
-
 }
 
 impl<'a, 'b: 'a> AsyncTransport for EmbassyUdpTransport<'a, 'b> {
@@ -131,9 +130,7 @@ impl<'a, 'b: 'a> AsyncTransport for EmbassyUdpTransport<'a, 'b> {
     /// transport.bind(3671)?;  // Bind to specific KNX port
     /// ```
     fn bind(&mut self, port: u16) -> Result<()> {
-        self.socket
-            .bind(port)
-            .map_err(|_| KnxError::socket_error())
+        self.socket.bind(port).map_err(|_| KnxError::socket_error())
     }
 
     async fn send_to(&mut self, data: &[u8], addr: IpEndpoint) -> Result<()> {
@@ -185,7 +182,10 @@ fn convert_from_embassy_endpoint(endpoint: EmbassyEndpoint) -> IpEndpoint {
     match endpoint.addr {
         IpAddress::Ipv4(addr) => {
             let octets = addr.octets();
-            IpEndpoint::new(Ipv4Addr::from([octets[0], octets[1], octets[2], octets[3]]), endpoint.port)
+            IpEndpoint::new(
+                Ipv4Addr::from([octets[0], octets[1], octets[2], octets[3]]),
+                endpoint.port,
+            )
         }
     }
 }

@@ -12,4 +12,3 @@ pub mod configuration;
 
 #[path = "../src/utility.rs"]
 pub mod utility;
-

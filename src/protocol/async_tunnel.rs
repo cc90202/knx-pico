@@ -51,12 +51,12 @@
 //! ```
 
 use crate::error::{KnxError, Result};
-use crate::protocol::tunnel::{TunnelClient, Connected};
-use crate::protocol::frame::KnxnetIpFrame;
-use crate::protocol::constants::ServiceType;
 use crate::net::transport::AsyncTransport;
 use crate::net::IpEndpoint;
-use embassy_time::{Duration, with_timeout};
+use crate::protocol::constants::ServiceType;
+use crate::protocol::frame::KnxnetIpFrame;
+use crate::protocol::tunnel::{Connected, TunnelClient};
+use embassy_time::{with_timeout, Duration};
 
 // Import unified logging macro from crate root
 use crate::pico_log;
@@ -198,7 +198,12 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
     /// Returns error if source data is too large for destination buffer.
     fn safe_buffer_copy(dest: &mut [u8], src: &[u8]) -> Result<usize> {
         if src.len() > dest.len() {
-            pico_log!(error, "Buffer overflow prevented: src_len={} > dest_len={}", src.len(), dest.len());
+            pico_log!(
+                error,
+                "Buffer overflow prevented: src_len={} > dest_len={}",
+                src.len(),
+                dest.len()
+            );
             return Err(KnxError::invalid_frame());
         }
         dest[..src.len()].copy_from_slice(src);
@@ -230,7 +235,11 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
     /// let transport = MockTransport::new();
     /// let client = AsyncTunnelClient::new(transport, [192, 168, 1, 10], 3671);
     /// ```
-    pub fn new(transport: T, gateway_addr: impl Into<crate::net::Ipv4Addr>, gateway_port: u16) -> Self {
+    pub fn new(
+        transport: T,
+        gateway_addr: impl Into<crate::net::Ipv4Addr>,
+        gateway_port: u16,
+    ) -> Self {
         Self {
             transport,
             gateway_endpoint: IpEndpoint::new(gateway_addr.into(), gateway_port),
@@ -263,19 +272,22 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
         // handle binding and return the actual local endpoint
         let (local_ip, local_port) = ([0, 0, 0, 0], 0);
 
-        pico_log!(info, "Local endpoint: {}.{}.{}.{}:{}",
-            local_ip[0], local_ip[1], local_ip[2], local_ip[3], local_port);
+        pico_log!(
+            info,
+            "Local endpoint: {}.{}.{}.{}:{}",
+            local_ip[0],
+            local_ip[1],
+            local_ip[2],
+            local_ip[3],
+            local_port
+        );
 
         // Create tunnel client with NAT mode
         let gateway_addr = self.gateway_endpoint.addr.octets();
         let gateway_port = self.gateway_endpoint.port;
 
-        let tunnel = TunnelClient::new_with_local_endpoint(
-            gateway_addr,
-            gateway_port,
-            local_ip,
-            local_port,
-        );
+        let tunnel =
+            TunnelClient::new_with_local_endpoint(gateway_addr, gateway_port, local_ip, local_port);
 
         // Build CONNECT_REQUEST
         let tunnel = tunnel.connect()?;
@@ -283,17 +295,49 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
 
         // Log the CONNECT_REQUEST details
         pico_log!(debug, "CONNECT_REQUEST frame ({} bytes):", frame_data.len());
-        pico_log!(debug, "  Header: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-            frame_data[0], frame_data[1], frame_data[2], frame_data[3], frame_data[4], frame_data[5]);
+        pico_log!(
+            debug,
+            "  Header: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+            frame_data[0],
+            frame_data[1],
+            frame_data[2],
+            frame_data[3],
+            frame_data[4],
+            frame_data[5]
+        );
         if frame_data.len() >= 26 {
-            pico_log!(debug, "  Control endpoint: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-                frame_data[6], frame_data[7], frame_data[8], frame_data[9],
-                frame_data[10], frame_data[11], frame_data[12], frame_data[13]);
-            pico_log!(debug, "  Data endpoint: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-                frame_data[14], frame_data[15], frame_data[16], frame_data[17],
-                frame_data[18], frame_data[19], frame_data[20], frame_data[21]);
-            pico_log!(debug, "  CRI: {:02x} {:02x} {:02x} {:02x}",
-                frame_data[22], frame_data[23], frame_data[24], frame_data[25]);
+            pico_log!(
+                debug,
+                "  Control endpoint: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                frame_data[6],
+                frame_data[7],
+                frame_data[8],
+                frame_data[9],
+                frame_data[10],
+                frame_data[11],
+                frame_data[12],
+                frame_data[13]
+            );
+            pico_log!(
+                debug,
+                "  Data endpoint: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                frame_data[14],
+                frame_data[15],
+                frame_data[16],
+                frame_data[17],
+                frame_data[18],
+                frame_data[19],
+                frame_data[20],
+                frame_data[21]
+            );
+            pico_log!(
+                debug,
+                "  CRI: {:02x} {:02x} {:02x} {:02x}",
+                frame_data[22],
+                frame_data[23],
+                frame_data[24],
+                frame_data[25]
+            );
         }
 
         // Send CONNECT_REQUEST using transport abstraction
@@ -303,15 +347,26 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
             .send_to(frame_data, self.gateway_endpoint)
             .await?;
 
-        pico_log!(info, "CONNECT_REQUEST sent, waiting for response (timeout: {}s)...", CONNECT_TIMEOUT.as_secs());
+        pico_log!(
+            info,
+            "CONNECT_REQUEST sent, waiting for response (timeout: {}s)...",
+            CONNECT_TIMEOUT.as_secs()
+        );
 
         // Wait for CONNECT_RESPONSE with timeout using transport abstraction
-        let (n, remote) = with_timeout(CONNECT_TIMEOUT, self.transport.recv_from(&mut self.rx_buffer))
-            .await
-            .map_err(|_| {
-                pico_log!(warn, "Timeout waiting for CONNECT_RESPONSE after {}s", CONNECT_TIMEOUT.as_secs());
-                KnxError::Timeout
-            })??;
+        let (n, remote) = with_timeout(
+            CONNECT_TIMEOUT,
+            self.transport.recv_from(&mut self.rx_buffer),
+        )
+        .await
+        .map_err(|_| {
+            pico_log!(
+                warn,
+                "Timeout waiting for CONNECT_RESPONSE after {}s",
+                CONNECT_TIMEOUT.as_secs()
+            );
+            KnxError::Timeout
+        })??;
 
         pico_log!(info, "Received {} bytes from {}", n, remote);
 
@@ -393,14 +448,16 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
         loop {
             // Safety limit: prevent infinite loop on extremely busy bus
             if flushed_count >= MAX_FLUSH_PACKETS {
-                pico_log!(warn, "Reached max flush limit ({} packets), bus may be extremely busy", MAX_FLUSH_PACKETS);
+                pico_log!(
+                    warn,
+                    "Reached max flush limit ({} packets), bus may be extremely busy",
+                    MAX_FLUSH_PACKETS
+                );
                 break;
             }
 
-            let result = with_timeout(
-                FLUSH_TIMEOUT,
-                self.transport.recv_from(&mut self.rx_buffer)
-            ).await;
+            let result =
+                with_timeout(FLUSH_TIMEOUT, self.transport.recv_from(&mut self.rx_buffer)).await;
 
             match result {
                 Ok(Ok((n, _))) => {
@@ -415,12 +472,18 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
                     if let Ok(frame) = KnxnetIpFrame::parse(&self.rx_buffer[..n]) {
                         if frame.service_type() == ServiceType::TunnellingRequest {
                             // ACK the pending TUNNELING_INDICATION
-                            if let Ok(cemi_data) = client.handle_tunneling_indication(frame.body()) {
+                            if let Ok(cemi_data) = client.handle_tunneling_indication(frame.body())
+                            {
                                 let ack_seq = client.recv_sequence().wrapping_sub(1);
                                 if let Ok(ack_frame) = client.build_tunneling_ack(ack_seq, 0) {
                                     let _ = self.transport.send_to(ack_frame, gateway).await;
                                 }
-                                pico_log!(debug, "Flushed TUNNELING_INDICATION #{}, cemi_len={}", flushed_count, cemi_data.len());
+                                pico_log!(
+                                    debug,
+                                    "Flushed TUNNELING_INDICATION #{}, cemi_len={}",
+                                    flushed_count,
+                                    cemi_data.len()
+                                );
                             }
                         } else {
                             pico_log!(debug, "Flushed non-INDICATION packet #{}", flushed_count);
@@ -432,7 +495,11 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
         }
 
         if flushed_count > 0 {
-            pico_log!(info, "Flushed {} pending packets before sending new command", flushed_count);
+            pico_log!(
+                info,
+                "Flushed {} pending packets before sending new command",
+                flushed_count
+            );
         } else {
             pico_log!(info, "No pending packets flushed (buffer was clean)");
         }
@@ -445,9 +512,7 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
         pico_log!(info, "Sending {} bytes to gateway...", frame_data.len());
 
         // Send via transport abstraction
-        self.transport
-            .send_to(frame_data, gateway)
-            .await?;
+        self.transport.send_to(frame_data, gateway).await?;
 
         pico_log!(info, "✓ Command sent successfully (fire-and-forget)");
 
@@ -480,7 +545,11 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
     pub async fn receive(&mut self) -> Result<Option<&[u8]>> {
         // First, check if we have a pending INDICATION saved from send_cemi()
         if let Some(len) = self.pending_indication_len.take() {
-            pico_log!(debug, "receive: returning pending INDICATION ({} bytes)", len);
+            pico_log!(
+                debug,
+                "receive: returning pending INDICATION ({} bytes)",
+                len
+            );
 
             // Copy to cemi_buffer and return
             self.cemi_buffer[..len].copy_from_slice(&self.pending_indication_buffer[..len]);
@@ -500,8 +569,9 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
         // Note: 200ms timeout to allow for network latency and processing
         let result = with_timeout(
             Duration::from_millis(200),
-            self.transport.recv_from(&mut self.rx_buffer)
-        ).await;
+            self.transport.recv_from(&mut self.rx_buffer),
+        )
+        .await;
 
         match result {
             Ok(Ok((n, _))) => {
@@ -576,8 +646,9 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
             // Wait for DISCONNECT_RESPONSE (best effort)
             let _ = with_timeout(
                 RESPONSE_TIMEOUT,
-                self.transport.recv_from(&mut self.rx_buffer)
-            ).await;
+                self.transport.recv_from(&mut self.rx_buffer),
+            )
+            .await;
         }
 
         self.transport.close();
@@ -625,9 +696,12 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
             .await?;
 
         // Wait for CONNECTIONSTATE_RESPONSE
-        let (n, _) = with_timeout(RESPONSE_TIMEOUT, self.transport.recv_from(&mut self.rx_buffer))
-            .await
-            .map_err(|_| KnxError::Timeout)??;
+        let (n, _) = with_timeout(
+            RESPONSE_TIMEOUT,
+            self.transport.recv_from(&mut self.rx_buffer),
+        )
+        .await
+        .map_err(|_| KnxError::Timeout)??;
 
         let frame = KnxnetIpFrame::parse(&self.rx_buffer[..n])?;
 

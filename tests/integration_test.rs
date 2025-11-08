@@ -14,7 +14,7 @@
 //!
 //! Note: Tests are marked with #[ignore] to avoid running them in CI without simulator.
 
-use std::net::{UdpSocket, Ipv4Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::time::Duration;
 
 // Only import types from the library crate
@@ -56,16 +56,21 @@ fn test_tunnel_connection() {
     println!("✓ CONNECT_REQUEST built ({} bytes)", connect_frame.len());
 
     // Send CONNECT_REQUEST
-    socket.send_to(connect_frame, simulator_addr()).expect("Failed to send");
+    socket
+        .send_to(connect_frame, simulator_addr())
+        .expect("Failed to send");
     println!("✓ CONNECT_REQUEST sent");
 
     // Receive CONNECT_RESPONSE
     let mut buffer = [0u8; 1024];
-    let (len, _) = socket.recv_from(&mut buffer).expect("No CONNECT_RESPONSE received");
+    let (len, _) = socket
+        .recv_from(&mut buffer)
+        .expect("No CONNECT_RESPONSE received");
     println!("✓ CONNECT_RESPONSE received ({} bytes)", len);
 
     // Parse response
-    let client = client.handle_connect_response(&buffer[6..len])
+    let client = client
+        .handle_connect_response(&buffer[6..len])
         .expect("Failed to parse CONNECT_RESPONSE");
     println!("✓ Connected! Channel ID: {}", client.channel_id());
 
@@ -129,7 +134,10 @@ fn test_tunnel_disconnect() {
     // Disconnect
     let client = client.disconnect().unwrap();
     let disconnect_frame = client.frame_data();
-    println!("✓ DISCONNECT_REQUEST built ({} bytes)", disconnect_frame.len());
+    println!(
+        "✓ DISCONNECT_REQUEST built ({} bytes)",
+        disconnect_frame.len()
+    );
 
     socket.send_to(disconnect_frame, simulator_addr()).unwrap();
     println!("✓ DISCONNECT_REQUEST sent");
@@ -160,7 +168,10 @@ fn test_individual_address_creation() {
 
     let addr = IndividualAddress::new(1, 1, 250).expect("Failed to create individual address");
     assert_eq!(addr.raw(), 0x11FA);
-    println!("✓ IndividualAddress::new(1, 1, 250) -> 0x{:04X}", addr.raw());
+    println!(
+        "✓ IndividualAddress::new(1, 1, 250) -> 0x{:04X}",
+        addr.raw()
+    );
 
     let addr = IndividualAddress::from(0x11FA);
     assert_eq!(addr.raw(), 0x11FA);

@@ -46,8 +46,8 @@
 //! // temp ≈ 21.5
 //! ```
 
-use crate::error::{KnxError, Result};
 use crate::dpt::{DptDecode, DptEncode};
+use crate::error::{KnxError, Result};
 
 /// DPT 9.xxx 2-byte float types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,7 +220,13 @@ mod tests {
     use super::*;
 
     fn assert_float_eq(a: f32, b: f32, epsilon: f32) {
-        assert!((a - b).abs() < epsilon, "Expected {} ≈ {}, diff = {}", a, b, (a - b).abs());
+        assert!(
+            (a - b).abs() < epsilon,
+            "Expected {} ≈ {}, diff = {}",
+            a,
+            b,
+            (a - b).abs()
+        );
     }
 
     #[test]
@@ -250,7 +256,6 @@ mod tests {
         // Just verify round-trip is close
         assert_float_eq(decoded, 21.5, 0.1);
     }
-
 
     #[test]
     fn test_encode_negative() {
@@ -442,5 +447,4 @@ mod tests {
         let decoded = Dpt9::Pressure.decode(&buf).unwrap();
         assert_float_eq(decoded, 100000.0, 500.0);
     }
-
 }

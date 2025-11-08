@@ -55,25 +55,25 @@
 use crate::error::Result;
 
 pub mod dpt1;
+pub mod dpt13;
 pub mod dpt3;
 pub mod dpt5;
 pub mod dpt7;
 pub mod dpt9;
-pub mod dpt13;
 
 // Re-export common types
 #[doc(inline)]
 pub use dpt1::Dpt1;
 #[doc(inline)]
-pub use dpt3::{Dpt3, StepCode, ControlCommand};
+pub use dpt13::Dpt13;
+#[doc(inline)]
+pub use dpt3::{ControlCommand, Dpt3, StepCode};
 #[doc(inline)]
 pub use dpt5::Dpt5;
 #[doc(inline)]
 pub use dpt7::Dpt7;
 #[doc(inline)]
 pub use dpt9::Dpt9;
-#[doc(inline)]
-pub use dpt13::Dpt13;
 
 /// Trait for encoding values to KNX data format
 ///

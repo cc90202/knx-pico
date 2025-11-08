@@ -43,8 +43,8 @@
 //! let len = Dpt3::Blind.encode((true, StepCode::Intervals1), &mut buf)?;
 //! ```
 
-use crate::error::{KnxError, Result};
 use crate::dpt::DptEncode;
+use crate::error::{KnxError, Result};
 
 /// DPT 3.xxx 3-bit controlled types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,12 +209,16 @@ mod tests {
         let mut buf = [0u8; 1];
 
         // Break with control=false (0b0000_0000 = 0x00)
-        let len = Dpt3::Dimming.encode((false, StepCode::Break), &mut buf).unwrap();
+        let len = Dpt3::Dimming
+            .encode((false, StepCode::Break), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         assert_eq!(buf[0], 0x00);
 
         // Break with control=true (0b0000_1000 = 0x08)
-        let len = Dpt3::Dimming.encode((true, StepCode::Break), &mut buf).unwrap();
+        let len = Dpt3::Dimming
+            .encode((true, StepCode::Break), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         assert_eq!(buf[0], 0x08);
     }
@@ -225,13 +229,17 @@ mod tests {
 
         // Decrease by 1 interval: control=false, stepcode=1
         // 0b0000_0001 = 0x01
-        let len = Dpt3::Dimming.encode((false, StepCode::Intervals1), &mut buf).unwrap();
+        let len = Dpt3::Dimming
+            .encode((false, StepCode::Intervals1), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         assert_eq!(buf[0], 0x01);
 
         // Decrease by 4 intervals: control=false, stepcode=3
         // 0b0000_0011 = 0x03
-        let len = Dpt3::Dimming.encode((false, StepCode::Intervals4), &mut buf).unwrap();
+        let len = Dpt3::Dimming
+            .encode((false, StepCode::Intervals4), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         assert_eq!(buf[0], 0x03);
     }
@@ -242,13 +250,17 @@ mod tests {
 
         // Increase by 1 interval: control=true, stepcode=1
         // 0b0000_1001 = 0x09
-        let len = Dpt3::Dimming.encode((true, StepCode::Intervals1), &mut buf).unwrap();
+        let len = Dpt3::Dimming
+            .encode((true, StepCode::Intervals1), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         assert_eq!(buf[0], 0x09);
 
         // Increase by 4 intervals: control=true, stepcode=3
         // 0b0000_1011 = 0x0B
-        let len = Dpt3::Dimming.encode((true, StepCode::Intervals4), &mut buf).unwrap();
+        let len = Dpt3::Dimming
+            .encode((true, StepCode::Intervals4), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         assert_eq!(buf[0], 0x0B);
     }
@@ -259,7 +271,9 @@ mod tests {
 
         // Move up by 2 intervals: control=false, stepcode=2
         // 0b0000_0010 = 0x02
-        let len = Dpt3::Blind.encode((false, StepCode::Intervals2), &mut buf).unwrap();
+        let len = Dpt3::Blind
+            .encode((false, StepCode::Intervals2), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         assert_eq!(buf[0], 0x02);
     }
@@ -270,7 +284,9 @@ mod tests {
 
         // Move down by 8 intervals: control=true, stepcode=4
         // 0b0000_1100 = 0x0C
-        let len = Dpt3::Blind.encode((true, StepCode::Intervals8), &mut buf).unwrap();
+        let len = Dpt3::Blind
+            .encode((true, StepCode::Intervals8), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         assert_eq!(buf[0], 0x0C);
     }
@@ -382,12 +398,12 @@ mod tests {
     fn test_decode_ignores_upper_bits() {
         // Upper 4 bits should be ignored
         let cmd = Dpt3::Dimming.decode(&[0xFF]).unwrap();
-        assert_eq!(cmd.control, true);  // Bit 3 is set
-        assert_eq!(cmd.stepcode, StepCode::Intervals64);  // Bits 0-2 are 111
+        assert_eq!(cmd.control, true); // Bit 3 is set
+        assert_eq!(cmd.stepcode, StepCode::Intervals64); // Bits 0-2 are 111
 
         let cmd = Dpt3::Dimming.decode(&[0xF0]).unwrap();
-        assert_eq!(cmd.control, false);  // Bit 3 is not set
-        assert_eq!(cmd.stepcode, StepCode::Break);  // Bits 0-2 are 000
+        assert_eq!(cmd.control, false); // Bit 3 is not set
+        assert_eq!(cmd.stepcode, StepCode::Break); // Bits 0-2 are 000
     }
 
     // =========================================================================
@@ -410,7 +426,9 @@ mod tests {
 
         for (control, stepcode) in &test_cases {
             // Encode
-            let len = Dpt3::Dimming.encode((*control, *stepcode), &mut buf).unwrap();
+            let len = Dpt3::Dimming
+                .encode((*control, *stepcode), &mut buf)
+                .unwrap();
             assert_eq!(len, 1);
 
             // Decode
@@ -482,14 +500,18 @@ mod tests {
         let mut buf = [0u8; 1];
 
         // Start dimming up
-        let len = Dpt3::Dimming.encode((true, StepCode::Intervals1), &mut buf).unwrap();
+        let len = Dpt3::Dimming
+            .encode((true, StepCode::Intervals1), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         let cmd = Dpt3::Dimming.decode(&buf[..len]).unwrap();
-        assert_eq!(cmd.control, true);  // increase
+        assert_eq!(cmd.control, true); // increase
         assert_eq!(cmd.stepcode.intervals(), 1);
 
         // Stop dimming
-        let len = Dpt3::Dimming.encode((false, StepCode::Break), &mut buf).unwrap();
+        let len = Dpt3::Dimming
+            .encode((false, StepCode::Break), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         let cmd = Dpt3::Dimming.decode(&buf[..len]).unwrap();
         assert_eq!(cmd.stepcode, StepCode::Break);
@@ -500,14 +522,18 @@ mod tests {
         let mut buf = [0u8; 1];
 
         // Move blind down
-        let len = Dpt3::Blind.encode((true, StepCode::Intervals8), &mut buf).unwrap();
+        let len = Dpt3::Blind
+            .encode((true, StepCode::Intervals8), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         let cmd = Dpt3::Blind.decode(&buf[..len]).unwrap();
-        assert_eq!(cmd.control, true);  // down
+        assert_eq!(cmd.control, true); // down
         assert_eq!(cmd.stepcode.intervals(), 8);
 
         // Stop blind
-        let len = Dpt3::Blind.encode((false, StepCode::Break), &mut buf).unwrap();
+        let len = Dpt3::Blind
+            .encode((false, StepCode::Break), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         let cmd = Dpt3::Blind.decode(&buf[..len]).unwrap();
         assert_eq!(cmd.stepcode, StepCode::Break);
@@ -522,12 +548,16 @@ mod tests {
         let mut buf = [0u8; 1];
 
         // Increase dimming by 4 intervals
-        let len = Dpt3::Dimming.encode((true, StepCode::Intervals4), &mut buf).unwrap();
+        let len = Dpt3::Dimming
+            .encode((true, StepCode::Intervals4), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         assert_eq!(buf[0], 0x0B);
 
         // Stop dimming
-        let len = Dpt3::Dimming.encode((false, StepCode::Break), &mut buf).unwrap();
+        let len = Dpt3::Dimming
+            .encode((false, StepCode::Break), &mut buf)
+            .unwrap();
         assert_eq!(len, 1);
         assert_eq!(buf[0], 0x00);
     }
@@ -580,7 +610,9 @@ mod tests {
         ];
 
         for (control, stepcode) in &test_cases {
-            let len = Dpt3::Dimming.encode((*control, *stepcode), &mut buf).unwrap();
+            let len = Dpt3::Dimming
+                .encode((*control, *stepcode), &mut buf)
+                .unwrap();
             assert_eq!(len, 1);
 
             let cmd = Dpt3::Dimming.decode(&buf[..len]).unwrap();
