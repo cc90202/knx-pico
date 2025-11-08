@@ -34,8 +34,8 @@
 //! let pulses = Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFF, 0xFF])?;  // -1
 //! ```
 
-use crate::error::{KnxError, Result};
 use crate::dpt::{DptDecode, DptEncode};
+use crate::error::{KnxError, Result};
 
 /// DPT 13.xxx 32-bit signed types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,31 +240,55 @@ mod tests {
         assert_eq!(Dpt13::Counter.decode(&[0x00, 0x00, 0x00, 0x01]).unwrap(), 1);
 
         // Medium positive
-        assert_eq!(Dpt13::Counter.decode(&[0x00, 0x12, 0xD6, 0x87]).unwrap(), 1234567);
+        assert_eq!(
+            Dpt13::Counter.decode(&[0x00, 0x12, 0xD6, 0x87]).unwrap(),
+            1234567
+        );
 
         // Large positive
-        assert_eq!(Dpt13::Counter.decode(&[0x05, 0xF5, 0xE1, 0x00]).unwrap(), 100000000);
+        assert_eq!(
+            Dpt13::Counter.decode(&[0x05, 0xF5, 0xE1, 0x00]).unwrap(),
+            100000000
+        );
 
         // Maximum positive
-        assert_eq!(Dpt13::Counter.decode(&[0x7F, 0xFF, 0xFF, 0xFF]).unwrap(), i32::MAX);
+        assert_eq!(
+            Dpt13::Counter.decode(&[0x7F, 0xFF, 0xFF, 0xFF]).unwrap(),
+            i32::MAX
+        );
     }
 
     #[test]
     fn test_counter_decode_negative() {
         // -1
-        assert_eq!(Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap(), -1);
+        assert_eq!(
+            Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap(),
+            -1
+        );
 
         // Small negative
-        assert_eq!(Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFF, 0x9C]).unwrap(), -100);
+        assert_eq!(
+            Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFF, 0x9C]).unwrap(),
+            -100
+        );
 
         // Medium negative
-        assert_eq!(Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFC, 0x18]).unwrap(), -1000);
+        assert_eq!(
+            Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFC, 0x18]).unwrap(),
+            -1000
+        );
 
         // Large negative
-        assert_eq!(Dpt13::Counter.decode(&[0xFA, 0x0A, 0x1F, 0x00]).unwrap(), -100000000);
+        assert_eq!(
+            Dpt13::Counter.decode(&[0xFA, 0x0A, 0x1F, 0x00]).unwrap(),
+            -100000000
+        );
 
         // Minimum (most negative)
-        assert_eq!(Dpt13::Counter.decode(&[0x80, 0x00, 0x00, 0x00]).unwrap(), i32::MIN);
+        assert_eq!(
+            Dpt13::Counter.decode(&[0x80, 0x00, 0x00, 0x00]).unwrap(),
+            i32::MIN
+        );
     }
 
     #[test]
@@ -299,11 +323,36 @@ mod tests {
 
     #[test]
     fn test_active_energy_decode() {
-        assert_eq!(Dpt13::ActiveEnergy.decode(&[0x00, 0x00, 0x00, 0x00]).unwrap(), 0);
-        assert_eq!(Dpt13::ActiveEnergy.decode(&[0x00, 0x00, 0x03, 0xE8]).unwrap(), 1000);
-        assert_eq!(Dpt13::ActiveEnergy.decode(&[0x00, 0x01, 0x86, 0xA0]).unwrap(), 100000);
-        assert_eq!(Dpt13::ActiveEnergy.decode(&[0x00, 0x07, 0xA1, 0x20]).unwrap(), 500000);
-        assert_eq!(Dpt13::ActiveEnergy.decode(&[0x00, 0x0F, 0x42, 0x40]).unwrap(), 1000000);
+        assert_eq!(
+            Dpt13::ActiveEnergy
+                .decode(&[0x00, 0x00, 0x00, 0x00])
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            Dpt13::ActiveEnergy
+                .decode(&[0x00, 0x00, 0x03, 0xE8])
+                .unwrap(),
+            1000
+        );
+        assert_eq!(
+            Dpt13::ActiveEnergy
+                .decode(&[0x00, 0x01, 0x86, 0xA0])
+                .unwrap(),
+            100000
+        );
+        assert_eq!(
+            Dpt13::ActiveEnergy
+                .decode(&[0x00, 0x07, 0xA1, 0x20])
+                .unwrap(),
+            500000
+        );
+        assert_eq!(
+            Dpt13::ActiveEnergy
+                .decode(&[0x00, 0x0F, 0x42, 0x40])
+                .unwrap(),
+            1000000
+        );
     }
 
     #[test]
@@ -338,11 +387,26 @@ mod tests {
 
     #[test]
     fn test_flow_rate_decode() {
-        assert_eq!(Dpt13::FlowRate.decode(&[0x00, 0x00, 0x00, 0x00]).unwrap(), 0);
-        assert_eq!(Dpt13::FlowRate.decode(&[0x00, 0x00, 0x03, 0xE8]).unwrap(), 1000);
-        assert_eq!(Dpt13::FlowRate.decode(&[0xFF, 0xFF, 0xFC, 0x18]).unwrap(), -1000);
-        assert_eq!(Dpt13::FlowRate.decode(&[0x00, 0x00, 0x27, 0x10]).unwrap(), 10000);
-        assert_eq!(Dpt13::FlowRate.decode(&[0xFF, 0xFF, 0xD8, 0xF0]).unwrap(), -10000);
+        assert_eq!(
+            Dpt13::FlowRate.decode(&[0x00, 0x00, 0x00, 0x00]).unwrap(),
+            0
+        );
+        assert_eq!(
+            Dpt13::FlowRate.decode(&[0x00, 0x00, 0x03, 0xE8]).unwrap(),
+            1000
+        );
+        assert_eq!(
+            Dpt13::FlowRate.decode(&[0xFF, 0xFF, 0xFC, 0x18]).unwrap(),
+            -1000
+        );
+        assert_eq!(
+            Dpt13::FlowRate.decode(&[0x00, 0x00, 0x27, 0x10]).unwrap(),
+            10000
+        );
+        assert_eq!(
+            Dpt13::FlowRate.decode(&[0xFF, 0xFF, 0xD8, 0xF0]).unwrap(),
+            -10000
+        );
     }
 
     #[test]
@@ -367,9 +431,24 @@ mod tests {
 
     #[test]
     fn test_reactive_energy_decode() {
-        assert_eq!(Dpt13::ReactiveEnergy.decode(&[0x00, 0x00, 0x00, 0x00]).unwrap(), 0);
-        assert_eq!(Dpt13::ReactiveEnergy.decode(&[0x00, 0x00, 0x13, 0x88]).unwrap(), 5000);
-        assert_eq!(Dpt13::ReactiveEnergy.decode(&[0xFF, 0xFF, 0xEC, 0x78]).unwrap(), -5000);
+        assert_eq!(
+            Dpt13::ReactiveEnergy
+                .decode(&[0x00, 0x00, 0x00, 0x00])
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            Dpt13::ReactiveEnergy
+                .decode(&[0x00, 0x00, 0x13, 0x88])
+                .unwrap(),
+            5000
+        );
+        assert_eq!(
+            Dpt13::ReactiveEnergy
+                .decode(&[0xFF, 0xFF, 0xEC, 0x78])
+                .unwrap(),
+            -5000
+        );
     }
 
     #[test]
@@ -399,10 +478,30 @@ mod tests {
 
     #[test]
     fn test_long_delta_time_sec_decode() {
-        assert_eq!(Dpt13::LongDeltaTimeSec.decode(&[0x00, 0x00, 0x00, 0x00]).unwrap(), 0);
-        assert_eq!(Dpt13::LongDeltaTimeSec.decode(&[0x00, 0x00, 0x0E, 0x10]).unwrap(), 3600);
-        assert_eq!(Dpt13::LongDeltaTimeSec.decode(&[0x00, 0x01, 0x51, 0x80]).unwrap(), 86400);
-        assert_eq!(Dpt13::LongDeltaTimeSec.decode(&[0xFF, 0xFF, 0xF1, 0xF0]).unwrap(), -3600);
+        assert_eq!(
+            Dpt13::LongDeltaTimeSec
+                .decode(&[0x00, 0x00, 0x00, 0x00])
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            Dpt13::LongDeltaTimeSec
+                .decode(&[0x00, 0x00, 0x0E, 0x10])
+                .unwrap(),
+            3600
+        );
+        assert_eq!(
+            Dpt13::LongDeltaTimeSec
+                .decode(&[0x00, 0x01, 0x51, 0x80])
+                .unwrap(),
+            86400
+        );
+        assert_eq!(
+            Dpt13::LongDeltaTimeSec
+                .decode(&[0xFF, 0xFF, 0xF1, 0xF0])
+                .unwrap(),
+            -3600
+        );
     }
 
     #[test]
@@ -428,8 +527,18 @@ mod tests {
     #[test]
     fn test_decode_extra_bytes() {
         // Extra bytes are ignored (only first 4 used)
-        assert_eq!(Dpt13::Counter.decode(&[0x00, 0x07, 0xA1, 0x20, 0xFF]).unwrap(), 500000);
-        assert_eq!(Dpt13::Counter.decode(&[0x00, 0x00, 0x03, 0xE8, 0x00, 0x00]).unwrap(), 1000);
+        assert_eq!(
+            Dpt13::Counter
+                .decode(&[0x00, 0x07, 0xA1, 0x20, 0xFF])
+                .unwrap(),
+            500000
+        );
+        assert_eq!(
+            Dpt13::Counter
+                .decode(&[0x00, 0x00, 0x03, 0xE8, 0x00, 0x00])
+                .unwrap(),
+            1000
+        );
     }
 
     #[test]
@@ -472,7 +581,10 @@ mod tests {
         assert_eq!(buf[3], 0x78);
 
         // Verify decoding
-        assert_eq!(Dpt13::Counter.decode(&[0x12, 0x34, 0x56, 0x78]).unwrap(), 0x12345678);
+        assert_eq!(
+            Dpt13::Counter.decode(&[0x12, 0x34, 0x56, 0x78]).unwrap(),
+            0x12345678
+        );
     }
 
     #[test]
@@ -485,7 +597,10 @@ mod tests {
         assert_eq!(&buf[..len], &[0xFF, 0xFF, 0xFF, 0xFF]);
 
         // Decode it back
-        assert_eq!(Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap(), -1);
+        assert_eq!(
+            Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap(),
+            -1
+        );
     }
 
     #[test]

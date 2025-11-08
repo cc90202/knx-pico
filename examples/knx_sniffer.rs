@@ -28,8 +28,6 @@
 mod common;
 
 use common::utility::{get_ssid, get_wifi_password};
-use knx_pico::knx_client::{KnxClient, KnxBuffers, KnxValue, DptType};
-use knx_pico::knx_discovery;
 use cyw43::Control;
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::unwrap;
@@ -42,6 +40,8 @@ use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
+use knx_pico::knx_client::{DptType, KnxBuffers, KnxClient, KnxValue};
+use knx_pico::knx_discovery;
 use panic_persist as _;
 use static_cell::StaticCell;
 
@@ -58,7 +58,7 @@ use defmt_rtt as _;
 use embassy_net::{Config, DhcpConfig, StackResources};
 
 // Import unified logging macro and convenience macros from knx_pico crate
-use knx_pico::{pico_log, knx_read, knx_write, ga};
+use knx_pico::{ga, knx_read, knx_write, pico_log};
 
 // Program metadata for `picotool info`
 #[unsafe(link_section = ".bi_entries")]
@@ -84,13 +84,19 @@ bind_interrupts!(struct UsbIrqs {
 
 /// Shared structure to pass the CYW43 controller between Embassy tasks
 #[derive(Clone, Copy)]
-#[allow(missing_debug_implementations, reason = "Internal mutex wrapper for WiFi control")]
+#[allow(
+    missing_debug_implementations,
+    reason = "Internal mutex wrapper for WiFi control"
+)]
 pub struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static>>);
 
 /// Main entry point for Embassy executor
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    #[allow(clippy::default_trait_access, reason = "Config name conflicts with embassy_net::Config")]
+    #[allow(
+        clippy::default_trait_access,
+        reason = "Config name conflicts with embassy_net::Config"
+    )]
     let p = embassy_rp::init(Default::default());
 
     // Start appropriate logger based on active feature
@@ -174,13 +180,20 @@ async fn main(spawner: Spawner) {
     loop {
         {
             let mut control = shared_control.0.lock().await;
-            match control.join(wifi_ssid, cyw43::JoinOptions::new(wifi_password.as_bytes())).await {
+            match control
+                .join(wifi_ssid, cyw43::JoinOptions::new(wifi_password.as_bytes()))
+                .await
+            {
                 Ok(()) => {
                     pico_log!(info, "WiFi connected successfully!");
                     break;
                 }
                 Err(e) => {
-                    pico_log!(error, "WiFi connection failed: status={}, retrying in 5s...", e.status);
+                    pico_log!(
+                        error,
+                        "WiFi connection failed: status={}, retrying in 5s...",
+                        e.status
+                    );
                 }
             }
         }
@@ -206,9 +219,18 @@ async fn main(spawner: Spawner) {
 
     pico_log!(info, "1. Testing SEARCH_REQUEST (gateway discovery)...");
 
-    let (knx_gateway_ip, knx_gateway_port) = if let Some(gateway) = knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
+    let (knx_gateway_ip, knx_gateway_port) = if let Some(gateway) =
+        knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await
+    {
         pico_log!(info, "✓ KNX Gateway discovered automatically!");
-        pico_log!(info, "  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
+        pico_log!(
+            info,
+            "  IP: {}.{}.{}.{}",
+            gateway.ip[0],
+            gateway.ip[1],
+            gateway.ip[2],
+            gateway.ip[3]
+        );
         pico_log!(info, "  Port: {}", gateway.port);
         (gateway.ip, gateway.port)
     } else {
@@ -221,8 +243,15 @@ async fn main(spawner: Spawner) {
         }
     };
 
-    pico_log!(info, "Connecting to KNX gateway at {}.{}.{}.{}:{}",
-          knx_gateway_ip[0], knx_gateway_ip[1], knx_gateway_ip[2], knx_gateway_ip[3], knx_gateway_port);
+    pico_log!(
+        info,
+        "Connecting to KNX gateway at {}.{}.{}.{}:{}",
+        knx_gateway_ip[0],
+        knx_gateway_ip[1],
+        knx_gateway_ip[2],
+        knx_gateway_ip[3],
+        knx_gateway_port
+    );
 
     // Allocate buffers for KNX client using the new KnxBuffers struct
     static KNX_BUFFERS: StaticCell<KnxBuffers> = StaticCell::new();
@@ -231,13 +260,15 @@ async fn main(spawner: Spawner) {
     // Create KNX client using the builder pattern
     let mut client = KnxClient::builder()
         .gateway(knx_gateway_ip, knx_gateway_port)
-        .device_address([1, 1, 1])  // Device address 1.1.1
+        .device_address([1, 1, 1]) // Device address 1.1.1
         .build_with_buffers(stack, knx_buffers)
         .unwrap();
 
     // Connect to gateway
     pico_log!(info, "2. Testing CONNECT_REQUEST...");
-    if let Ok(()) = client.connect().await { pico_log!(info, "✓ Connected to KNX gateway!") } else {
+    if let Ok(()) = client.connect().await {
+        pico_log!(info, "✓ Connected to KNX gateway!")
+    } else {
         pico_log!(error, "✗ Failed to connect to KNX gateway");
         pico_log!(error, "Tests cannot continue without connection");
         loop {
@@ -255,8 +286,11 @@ async fn main(spawner: Spawner) {
     // Note: Read operations are fire-and-forget in this implementation
     // The response would come as a GroupResponse event
     // Using knx_read! macro for concise syntax
-    match knx_read!(client, 1/2/3).await {
-        Ok(()) => pico_log!(info, "✓ READ command sent (response would be received as event)"),
+    match knx_read!(client, 1 / 2 / 3).await {
+        Ok(()) => pico_log!(
+            info,
+            "✓ READ command sent (response would be received as event)"
+        ),
         Err(_) => pico_log!(error, "✗ Failed to send READ command"),
     }
 
@@ -270,7 +304,7 @@ async fn main(spawner: Spawner) {
 
     pico_log!(info, "Sending WRITE: bool=true to 1/2/3");
     // Using knx_write! macro for concise syntax
-    match knx_write!(client, 1/2/3, KnxValue::Bool(true)).await {
+    match knx_write!(client, 1 / 2 / 3, KnxValue::Bool(true)).await {
         Ok(()) => {
             pico_log!(info, "✓ WRITE command sent successfully (fire-and-forget)");
         }
@@ -283,7 +317,7 @@ async fn main(spawner: Spawner) {
     Timer::after(Duration::from_secs(2)).await;
 
     pico_log!(info, "Sending WRITE: bool=false to 1/2/3");
-    if let Ok(()) = knx_write!(client, 1/2/3, KnxValue::Bool(false)).await {
+    if let Ok(()) = knx_write!(client, 1 / 2 / 3, KnxValue::Bool(false)).await {
         pico_log!(info, "✓ WRITE command sent successfully");
     } else {
         pico_log!(error, "✗ Failed to send WRITE command");
@@ -294,7 +328,7 @@ async fn main(spawner: Spawner) {
             Ok(()) => {
                 pico_log!(info, "✓ Reconnected to KNX gateway!");
                 // Retry the command with macro
-                if let Ok(()) = knx_write!(client, 1/2/3, KnxValue::Bool(false)).await {
+                if let Ok(()) = knx_write!(client, 1 / 2 / 3, KnxValue::Bool(false)).await {
                     pico_log!(info, "✓ Command sent successfully after reconnection");
                 }
             }
@@ -315,10 +349,10 @@ async fn main(spawner: Spawner) {
     // Register multiple DPT types
     // Note: register_dpts! macro would be used here in production code
     let addresses_and_types = [
-        (ga!(1/2/3), DptType::Bool),         // Light switch
-        (ga!(1/2/5), DptType::Percent),      // Dimmer
-        (ga!(1/2/10), DptType::Temperature), // Temperature sensor
-        (ga!(1/2/11), DptType::Humidity),    // Humidity sensor
+        (ga!(1 / 2 / 3), DptType::Bool),         // Light switch
+        (ga!(1 / 2 / 5), DptType::Percent),      // Dimmer
+        (ga!(1 / 2 / 10), DptType::Temperature), // Temperature sensor
+        (ga!(1 / 2 / 11), DptType::Humidity),    // Humidity sensor
     ];
 
     let mut registered = 0;
@@ -346,7 +380,10 @@ async fn main(spawner: Spawner) {
     // Respond with a temperature value (as if we received a read request)
     // In a real scenario, this would be inside receive_event() when handling GroupRead events
     // Note: knx_respond! macro would be used here: knx_respond!(client, 1/2/10, KnxValue::Temperature(22.5))
-    match client.respond(ga!(1/2/10), KnxValue::Temperature(22.5)).await {
+    match client
+        .respond(ga!(1 / 2 / 10), KnxValue::Temperature(22.5))
+        .await
+    {
         Ok(()) => pico_log!(info, "✓ RESPOND sent: Temperature = 22.5°C to 1/2/10"),
         Err(_) => pico_log!(error, "✗ Failed to send RESPOND"),
     }
@@ -366,7 +403,10 @@ async fn main(spawner: Spawner) {
     pico_log!(info, "✓ REGISTER_DPTS: OK (registered 4 DPT types)");
     pico_log!(info, "✓ RESPOND: OK (sent temperature response)");
     pico_log!(info, "");
-    pico_log!(info, "All tests completed! Convenience macros demonstrated (ga!, knx_read!, knx_write!)");
+    pico_log!(
+        info,
+        "All tests completed! Convenience macros demonstrated (ga!, knx_read!, knx_write!)"
+    );
     pico_log!(info, "");
 
     // ========================================================================
@@ -379,8 +419,14 @@ async fn main(spawner: Spawner) {
     // that it may cause system crashes after prolonged operation.
     // ========================================================================
 
-    pico_log!(warn, "Note: Passive sniffer mode is disabled to prevent crashes");
-    pico_log!(info, "System will now idle. Reset device to run tests again.");
+    pico_log!(
+        warn,
+        "Note: Passive sniffer mode is disabled to prevent crashes"
+    );
+    pico_log!(
+        info,
+        "System will now idle. Reset device to run tests again."
+    );
 
     // Idle loop
     loop {
@@ -473,7 +519,9 @@ async fn logger_task(driver: embassy_rp::usb::Driver<'static, embassy_rp::periph
 }
 
 #[embassy_executor::task]
-async fn cyw43_task(runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>) -> ! {
+async fn cyw43_task(
+    runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>,
+) -> ! {
     runner.run().await
 }
 
@@ -498,4 +546,3 @@ async fn blink_task(control: SharedControl) {
         ticker.next().await;
     }
 }
-

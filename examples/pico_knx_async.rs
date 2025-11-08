@@ -36,22 +36,22 @@
 
 mod common;
 
-use knx_pico::knx_discovery;
 use common::utility::{get_ssid, get_wifi_password};
+use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::unwrap;
 use embassy_executor::Spawner;
-use embassy_net::{Config, DhcpConfig, StackResources};
 use embassy_net::udp::PacketMetadata;
+use embassy_net::{Config, DhcpConfig, StackResources};
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{DMA_CH0, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
-use embassy_time::{Duration, Timer};
-use static_cell::StaticCell;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
+use embassy_time::{Duration, Timer};
+use knx_pico::knx_discovery;
+use static_cell::StaticCell;
 use {defmt_rtt as _, panic_persist as _};
-use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 
 // Conditional imports for USB logger
 #[cfg(feature = "usb-logger")]
@@ -60,12 +60,12 @@ use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler as UsbInterruptHandler};
 
 use knx_pico::addressing::GroupAddress;
-use knx_pico::protocol::async_tunnel::AsyncTunnelClient;
-use knx_pico::net::embassy_adapter::EmbassyUdpTransport;
-use knx_pico::protocol::cemi::{ControlField1, ControlField2, Apci};
-use knx_pico::protocol::constants::CEMIMessageCode;
 use knx_pico::addressing::IndividualAddress;
-use knx_pico::{pico_log, ga};
+use knx_pico::net::embassy_adapter::EmbassyUdpTransport;
+use knx_pico::protocol::async_tunnel::AsyncTunnelClient;
+use knx_pico::protocol::cemi::{Apci, ControlField1, ControlField2};
+use knx_pico::protocol::constants::CEMIMessageCode;
+use knx_pico::{ga, pico_log};
 
 // ============================================================================
 // Configuration
@@ -146,19 +146,25 @@ async fn blink_task(shared_control: SharedControl) -> ! {
     }
 }
 
-
 // ============================================================================
 // Main Application
 // ============================================================================
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    #[allow(clippy::default_trait_access, reason = "Config name conflicts with embassy_net::Config")]
+    #[allow(
+        clippy::default_trait_access,
+        reason = "Config name conflicts with embassy_net::Config"
+    )]
     let p = embassy_rp::init(Default::default());
 
     // Start appropriate logger based on active feature
     #[cfg(feature = "usb-logger")]
-    #[allow(clippy::semicolon_if_nothing_returned, clippy::semicolon_outside_block, reason = "Conflicting clippy suggestions")]
+    #[allow(
+        clippy::semicolon_if_nothing_returned,
+        clippy::semicolon_outside_block,
+        reason = "Conflicting clippy suggestions"
+    )]
     {
         let driver = Driver::new(p.USB, UsbIrqs);
         spawner.must_spawn(logger_task(driver));
@@ -234,10 +240,7 @@ async fn main(spawner: Spawner) {
 
     loop {
         match control
-            .join(
-                wifi_ssid,
-                cyw43::JoinOptions::new(wifi_password.as_bytes()),
-            )
+            .join(wifi_ssid, cyw43::JoinOptions::new(wifi_password.as_bytes()))
             .await
         {
             Ok(()) => {
@@ -245,14 +248,19 @@ async fn main(spawner: Spawner) {
                 break;
             }
             Err(e) => {
-                pico_log!(error, "WiFi connection failed: status={}, retrying in 5s...", e.status);
+                pico_log!(
+                    error,
+                    "WiFi connection failed: status={}, retrying in 5s...",
+                    e.status
+                );
                 Timer::after(Duration::from_secs(5)).await;
             }
         }
     }
 
     // Create shared control for LED blink task (after WiFi connection)
-    static CONTROL_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, cyw43::Control<'static>>> = StaticCell::new();
+    static CONTROL_MUTEX: StaticCell<Mutex<CriticalSectionRawMutex, cyw43::Control<'static>>> =
+        StaticCell::new();
     let shared_control = SharedControl(CONTROL_MUTEX.init(Mutex::new(control)));
 
     // Start LED blink task
@@ -272,9 +280,18 @@ async fn main(spawner: Spawner) {
 
     pico_log!(info, "Discovering KNX gateway via multicast...");
 
-    let (knx_gateway_ip, knx_gateway_port) = if let Some(gateway) = knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
+    let (knx_gateway_ip, knx_gateway_port) = if let Some(gateway) =
+        knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await
+    {
         pico_log!(info, "✓ KNX Gateway discovered automatically!");
-        pico_log!(info, "  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
+        pico_log!(
+            info,
+            "  IP: {}.{}.{}.{}",
+            gateway.ip[0],
+            gateway.ip[1],
+            gateway.ip[2],
+            gateway.ip[3]
+        );
         pico_log!(info, "  Port: {}", gateway.port);
         (gateway.ip, gateway.port)
     } else {
@@ -291,8 +308,15 @@ async fn main(spawner: Spawner) {
     // KNX Connection
     // ========================================================================
 
-    pico_log!(info, "Connecting to KNX gateway at {}.{}.{}.{}:{}",
-          knx_gateway_ip[0], knx_gateway_ip[1], knx_gateway_ip[2], knx_gateway_ip[3], knx_gateway_port);
+    pico_log!(
+        info,
+        "Connecting to KNX gateway at {}.{}.{}.{}:{}",
+        knx_gateway_ip[0],
+        knx_gateway_ip[1],
+        knx_gateway_ip[2],
+        knx_gateway_ip[3],
+        knx_gateway_port
+    );
 
     // Allocate buffers for AsyncTunnelClient
     static RX_META: StaticCell<[PacketMetadata; 4]> = StaticCell::new();
@@ -306,19 +330,9 @@ async fn main(spawner: Spawner) {
     let tx_buffer = TX_BUFFER.init([0u8; 2048]);
 
     // Create UDP transport with embassy stack
-    let transport = EmbassyUdpTransport::new(
-        stack,
-        rx_meta,
-        rx_buffer,
-        tx_meta,
-        tx_buffer,
-    );
+    let transport = EmbassyUdpTransport::new(stack, rx_meta, rx_buffer, tx_meta, tx_buffer);
 
-    let mut client = AsyncTunnelClient::new(
-        transport,
-        knx_gateway_ip,
-        knx_gateway_port,
-    );
+    let mut client = AsyncTunnelClient::new(transport, knx_gateway_ip, knx_gateway_port);
 
     // Connect to gateway
     match client.connect().await {
@@ -335,7 +349,7 @@ async fn main(spawner: Spawner) {
 
     pico_log!(info, "Example 1: Turning ON living room light (1/2/3)");
 
-    let light_addr = ga!(1/2/3);
+    let light_addr = ga!(1 / 2 / 3);
     let cemi_on = build_group_write_bool(light_addr, true);
     match client.send_cemi(&cemi_on).await {
         Ok(()) => pico_log!(info, "✓ Command sent successfully"),
@@ -362,9 +376,12 @@ async fn main(spawner: Spawner) {
     // Example 3: DPT 3 - Dimming Control (increase brightness)
     // ========================================================================
 
-    pico_log!(info, "Example 3: DPT 3 - Dimmer increase brightness (4 steps)");
+    pico_log!(
+        info,
+        "Example 3: DPT 3 - Dimmer increase brightness (4 steps)"
+    );
 
-    let dimmer_addr = ga!(1/2/5);
+    let dimmer_addr = ga!(1 / 2 / 5);
     // DPT 3.007: Control Dimming
     // Byte format: cccc SUUU
     //   c = control (0011 = increase/decrease command)
@@ -385,7 +402,7 @@ async fn main(spawner: Spawner) {
 
     pico_log!(info, "Example 4: DPT 5 - Set valve position to 75%");
 
-    let valve_addr = ga!(1/2/6);
+    let valve_addr = ga!(1 / 2 / 6);
     // DPT 5.001: Percentage (0-100%)
     // Range: 0x00 (0%) to 0xFF (100%)
     // 75% = 0xFF * 0.75 = 191 = 0xBF
@@ -401,16 +418,19 @@ async fn main(spawner: Spawner) {
     // Example 5: DPT 9 - Temperature (write 21.5°C)
     // ========================================================================
 
-    pico_log!(info, "Example 5: DPT 9 - Set temperature setpoint to 21.5°C");
+    pico_log!(
+        info,
+        "Example 5: DPT 9 - Set temperature setpoint to 21.5°C"
+    );
 
-    let temp_addr = ga!(1/2/7);  // Temperature sensor/setpoint
-    // DPT 9.001: Temperature (2-byte float)
-    // Format: MEEE EMMM MMMM MMMM
-    //   M = mantissa (11-bit signed)
-    //   E = exponent (4-bit signed)
-    // Value = (0.01 * M) * 2^E
-    // For 21.5°C: M=2150, E=0
-    // Encoding: 0x0C 0x66 (calculated for 21.5)
+    let temp_addr = ga!(1 / 2 / 7); // Temperature sensor/setpoint
+                                    // DPT 9.001: Temperature (2-byte float)
+                                    // Format: MEEE EMMM MMMM MMMM
+                                    //   M = mantissa (11-bit signed)
+                                    //   E = exponent (4-bit signed)
+                                    // Value = (0.01 * M) * 2^E
+                                    // For 21.5°C: M=2150, E=0
+                                    // Encoding: 0x0C 0x66 (calculated for 21.5)
     let cemi_temp = build_group_write_dpt9(temp_addr, 0x0C, 0x66);
     match client.send_cemi(&cemi_temp).await {
         Ok(()) => pico_log!(info, "✓ Temperature setpoint written"),
@@ -423,7 +443,10 @@ async fn main(spawner: Spawner) {
     // Example 6: Listen for events from KNX bus
     // ========================================================================
 
-    pico_log!(info, "Example 6: Listening for KNX bus events (press Ctrl+C to stop)...");
+    pico_log!(
+        info,
+        "Example 6: Listening for KNX bus events (press Ctrl+C to stop)..."
+    );
     pico_log!(info, "");
     pico_log!(info, "=== All examples completed successfully! ===");
     pico_log!(info, "Now entering passive monitoring mode...");
@@ -446,7 +469,12 @@ async fn main(spawner: Spawner) {
         match client.receive().await {
             Ok(Some(cemi_data)) => {
                 event_count += 1;
-                pico_log!(info, "[Event #{}] Received cEMI frame ({} bytes)", event_count, cemi_data.len());
+                pico_log!(
+                    info,
+                    "[Event #{}] Received cEMI frame ({} bytes)",
+                    event_count,
+                    cemi_data.len()
+                );
 
                 // Parse the cEMI frame
                 if let Ok(cemi) = knx_pico::protocol::cemi::CEMIFrame::parse(cemi_data) {
@@ -454,8 +482,12 @@ async fn main(spawner: Spawner) {
                         if ldata.is_group_write() {
                             if let Some(dest) = ldata.destination_group() {
                                 let dest_raw: u16 = dest.into();
-                                pico_log!(info, "  GroupValue_Write to {:04X}: {} bytes",
-                                      dest_raw, ldata.data.len());
+                                pico_log!(
+                                    info,
+                                    "  GroupValue_Write to {:04X}: {} bytes",
+                                    dest_raw,
+                                    ldata.data.len()
+                                );
 
                                 // Example: decode boolean value (DPT 1)
                                 if ldata.data.is_empty() {

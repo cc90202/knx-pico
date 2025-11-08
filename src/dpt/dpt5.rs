@@ -34,8 +34,8 @@
 //! let angle = Dpt5::Angle.decode(&buf[..len])?;  // 180
 //! ```
 
+use crate::dpt::{DptDecode, DptEncode};
 use crate::error::{KnxError, Result};
-use crate::dpt::{DptEncode, DptDecode};
 
 /// DPT 5.xxx 8-bit unsigned types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,7 +176,6 @@ impl DptDecode<u16> for Dpt5 {
         self.decode_scaled(data[0])
     }
 }
-
 
 #[cfg(test)]
 mod tests {

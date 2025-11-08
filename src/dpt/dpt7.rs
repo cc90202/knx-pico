@@ -38,8 +38,8 @@
 //! let kelvin = Dpt7::ColorTemperature.decode(&[0x0F, 0xA0])?;  // 4000K
 //! ```
 
-use crate::error::{KnxError, Result};
 use crate::dpt::{DptDecode, DptEncode};
+use crate::error::{KnxError, Result};
 
 /// DPT 7.xxx 16-bit unsigned types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,12 +145,7 @@ impl Dpt7 {
         // Indices 0 and 1 are both < 2, therefore within bounds.
         // Using get_unchecked eliminates redundant bounds checks in DPT decoding,
         // providing performance benefit for frequent value conversions in KNX communication.
-        let bytes = unsafe {
-            [
-                *data.get_unchecked(0),
-                *data.get_unchecked(1),
-            ]
-        };
+        let bytes = unsafe { [*data.get_unchecked(0), *data.get_unchecked(1)] };
 
         // u16::from_be_bytes is optimized by LLVM to a simple load on big-endian
         // and a bswap instruction on little-endian (single cycle on ARM)
@@ -404,7 +399,10 @@ mod tests {
     fn test_decode_extra_bytes() {
         // Extra bytes are ignored (only first 2 used)
         assert_eq!(Dpt7::Pulses.decode(&[0x04, 0xD2, 0xFF]).unwrap(), 1234);
-        assert_eq!(Dpt7::Pulses.decode(&[0x13, 0x88, 0x00, 0x00]).unwrap(), 5000);
+        assert_eq!(
+            Dpt7::Pulses.decode(&[0x13, 0x88, 0x00, 0x00]).unwrap(),
+            5000
+        );
     }
 
     #[test]

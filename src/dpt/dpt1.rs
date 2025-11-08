@@ -32,8 +32,8 @@
 //! let state = Dpt1::Switch.decode(&buf[..len])?;  // true
 //! ```
 
+use crate::dpt::{DptDecode, DptEncode};
 use crate::error::{KnxError, Result};
-use crate::dpt::{DptEncode, DptDecode};
 
 /// DPT 1.xxx Boolean types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

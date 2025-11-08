@@ -20,15 +20,15 @@
 //! client.write(GroupAddress::from(0x0A03), KnxValue::Bool(true)).await?;
 //! ```
 
-use core::fmt;
-use embassy_net::udp::PacketMetadata;
-use heapless::index_map::FnvIndexMap;
 use crate::addressing::{GroupAddress, IndividualAddress};
 use crate::error::KnxError;
 use crate::net::embassy_adapter::EmbassyUdpTransport;
 use crate::protocol::async_tunnel::AsyncTunnelClient;
 use crate::protocol::cemi::{ControlField1, ControlField2};
 use crate::protocol::constants::CEMIMessageCode;
+use core::fmt;
+use embassy_net::udp::PacketMetadata;
+use heapless::index_map::FnvIndexMap;
 
 /// Default device individual address (1.1.1).
 const DEVICE_ADDRESS_RAW: u16 = 0x1101;

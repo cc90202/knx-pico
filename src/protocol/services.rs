@@ -47,7 +47,10 @@
 //! ```
 
 use crate::error::{KnxError, Result};
-use crate::protocol::constants::{SERVICE_CONNECT_REQUEST, SERVICE_CONNECTIONSTATE_REQUEST, SERVICE_DISCONNECT_REQUEST, SERVICE_TUNNELING_REQUEST, SERVICE_TUNNELING_ACK};
+use crate::protocol::constants::{
+    SERVICE_CONNECTIONSTATE_REQUEST, SERVICE_CONNECT_REQUEST, SERVICE_DISCONNECT_REQUEST,
+    SERVICE_TUNNELING_ACK, SERVICE_TUNNELING_REQUEST,
+};
 use crate::protocol::frame::Hpai;
 
 /// Connection Request Information (CRI) for tunneling
@@ -540,7 +543,10 @@ mod tests {
 
         assert_eq!(len, 26);
         assert_eq!(&buf[0..2], &[0x06, 0x10]); // Header
-        assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), SERVICE_CONNECT_REQUEST);
+        assert_eq!(
+            u16::from_be_bytes([buf[2], buf[3]]),
+            SERVICE_CONNECT_REQUEST
+        );
     }
 
     #[test]

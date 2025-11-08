@@ -283,14 +283,14 @@ pub enum Tpci {
     /// Numbered Data Packet (NDP) with sequence number
     NumberedData {
         /// Sequence number (0-15)
-        sequence: u8
+        sequence: u8,
     },
     /// Unnumbered Control Packet (UCP)
     UnnumberedControl,
     /// Numbered Control Packet (NCP) with sequence number
     NumberedControl {
         /// Sequence number (0-15)
-        sequence: u8
+        sequence: u8,
     },
 }
 
@@ -496,7 +496,9 @@ impl<'a> LDataFrame<'a> {
     /// Get destination as group address (if applicable)
     #[inline]
     pub fn destination_group(&self) -> Option<GroupAddress> {
-        self.ctrl2.is_group_address().then(|| GroupAddress::from(self.destination_raw))
+        self.ctrl2
+            .is_group_address()
+            .then(|| GroupAddress::from(self.destination_raw))
     }
 
     /// Get destination as individual address (if applicable)
@@ -550,7 +552,8 @@ impl<'a> CEMIFrame<'a> {
             return Err(KnxError::buffer_too_small());
         }
 
-        let message_code = CEMIMessageCode::from_u8(data[0]).ok_or_else(KnxError::invalid_message_code)?;
+        let message_code =
+            CEMIMessageCode::from_u8(data[0]).ok_or_else(KnxError::invalid_message_code)?;
 
         Ok(Self { message_code, data })
     }

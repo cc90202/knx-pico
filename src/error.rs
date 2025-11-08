@@ -287,27 +287,47 @@ impl KnxError {
     // Protocol errors
     #[inline]
     pub(crate) const fn invalid_frame() -> Self {
-        Self::Protocol(ProtocolError { kind: ProtocolErrorKind::InvalidFrame, #[cfg(feature = "std")] backtrace: Backtrace::disabled() })
+        Self::Protocol(ProtocolError {
+            kind: ProtocolErrorKind::InvalidFrame,
+            #[cfg(feature = "std")]
+            backtrace: Backtrace::disabled(),
+        })
     }
 
     #[inline]
     pub(crate) const fn invalid_checksum() -> Self {
-        Self::Protocol(ProtocolError { kind: ProtocolErrorKind::InvalidChecksum, #[cfg(feature = "std")] backtrace: Backtrace::disabled() })
+        Self::Protocol(ProtocolError {
+            kind: ProtocolErrorKind::InvalidChecksum,
+            #[cfg(feature = "std")]
+            backtrace: Backtrace::disabled(),
+        })
     }
 
     #[inline]
     pub(crate) const fn unsupported_version() -> Self {
-        Self::Protocol(ProtocolError { kind: ProtocolErrorKind::UnsupportedVersion, #[cfg(feature = "std")] backtrace: Backtrace::disabled() })
+        Self::Protocol(ProtocolError {
+            kind: ProtocolErrorKind::UnsupportedVersion,
+            #[cfg(feature = "std")]
+            backtrace: Backtrace::disabled(),
+        })
     }
 
     #[inline]
     pub(crate) const fn unsupported_service_type() -> Self {
-        Self::Protocol(ProtocolError { kind: ProtocolErrorKind::UnsupportedServiceType, #[cfg(feature = "std")] backtrace: Backtrace::disabled() })
+        Self::Protocol(ProtocolError {
+            kind: ProtocolErrorKind::UnsupportedServiceType,
+            #[cfg(feature = "std")]
+            backtrace: Backtrace::disabled(),
+        })
     }
 
     #[inline]
     pub(crate) const fn payload_too_large() -> Self {
-        Self::Protocol(ProtocolError { kind: ProtocolErrorKind::PayloadTooLarge, #[cfg(feature = "std")] backtrace: Backtrace::disabled() })
+        Self::Protocol(ProtocolError {
+            kind: ProtocolErrorKind::PayloadTooLarge,
+            #[cfg(feature = "std")]
+            backtrace: Backtrace::disabled(),
+        })
     }
 
     // Connection errors
@@ -375,15 +395,21 @@ impl KnxError {
 
     // Addressing errors
     pub(crate) fn invalid_group_address() -> Self {
-        Self::Addressing(AddressingError::new(AddressingErrorKind::InvalidGroupAddress))
+        Self::Addressing(AddressingError::new(
+            AddressingErrorKind::InvalidGroupAddress,
+        ))
     }
 
     pub(crate) fn invalid_address() -> Self {
-        Self::Addressing(AddressingError::new(AddressingErrorKind::InvalidGroupAddress))
+        Self::Addressing(AddressingError::new(
+            AddressingErrorKind::InvalidGroupAddress,
+        ))
     }
 
     pub(crate) fn invalid_individual_address() -> Self {
-        Self::Addressing(AddressingError::new(AddressingErrorKind::InvalidIndividualAddress))
+        Self::Addressing(AddressingError::new(
+            AddressingErrorKind::InvalidIndividualAddress,
+        ))
     }
 
     pub(crate) fn address_out_of_range() -> Self {

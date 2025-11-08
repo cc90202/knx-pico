@@ -146,13 +146,20 @@ async fn main(spawner: Spawner) {
     loop {
         {
             let mut control = shared_control.0.lock().await;
-            match control.join(wifi_ssid, cyw43::JoinOptions::new(wifi_password.as_bytes())).await {
+            match control
+                .join(wifi_ssid, cyw43::JoinOptions::new(wifi_password.as_bytes()))
+                .await
+            {
                 Ok(_) => {
                     pico_log!(info, "WiFi connected successfully!");
                     break;
                 }
                 Err(e) => {
-                    pico_log!(error, "WiFi connection failed: status={}, retrying in 5s...", e.status);
+                    pico_log!(
+                        error,
+                        "WiFi connection failed: status={}, retrying in 5s...",
+                        e.status
+                    );
                 }
             }
         }
@@ -172,7 +179,10 @@ async fn main(spawner: Spawner) {
 
     pico_log!(info, "✓ KNX-RS initialized and ready!");
     pico_log!(info, "System running in idle mode");
-    pico_log!(info, "To test KNX functionality, run: cargo run --example knx_sniffer");
+    pico_log!(
+        info,
+        "To test KNX functionality, run: cargo run --example knx_sniffer"
+    );
 
     // Main application loop - heartbeat only
     loop {
@@ -189,7 +199,9 @@ async fn logger_task(driver: Driver<'static, USB>) {
 }
 
 #[embassy_executor::task]
-async fn cyw43_task(runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>) -> ! {
+async fn cyw43_task(
+    runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>,
+) -> ! {
     runner.run().await
 }
 
@@ -214,4 +226,3 @@ async fn blink_task(control: SharedControl) {
         ticker.next().await;
     }
 }
-

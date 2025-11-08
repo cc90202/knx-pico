@@ -84,4 +84,3 @@ macro_rules! pico_log {
     (error, $($arg:tt)*) => { defmt::error!($($arg)*) };
     (trace, $($arg:tt)*) => { defmt::trace!($($arg)*) };
 }
-

@@ -1,5 +1,8 @@
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
-#![expect(dead_code, reason = "Library under development, not all items used yet")]
+#![expect(
+    dead_code,
+    reason = "Library under development, not all items used yet"
+)]
 #![doc = include_str!("../README.md")]
 // Clippy configuration
 #![allow(clippy::doc_markdown)] // Many KNX terms don't need backticks
@@ -53,7 +56,6 @@ pub mod knx_client;
 #[cfg(any(feature = "embassy-rp", feature = "embassy-rp-usb"))]
 pub mod knx_discovery;
 
-
 // Re-export commonly used types
 #[doc(inline)]
 pub use addressing::{GroupAddress, IndividualAddress};
@@ -62,7 +64,7 @@ pub use dpt::{Dpt1, Dpt5, Dpt9, DptDecode, DptEncode};
 #[doc(inline)]
 pub use error::{KnxError, Result};
 #[doc(inline)]
-pub use net::{Ipv4Addr, IpEndpoint};
+pub use net::{IpEndpoint, Ipv4Addr};
 
 // Re-export client types when embassy features are enabled
 #[cfg(any(feature = "embassy-rp", feature = "embassy-rp-usb"))]
