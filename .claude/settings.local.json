@@ -11,7 +11,9 @@
       "Skill(rust-guidelines)",
       "Bash(cargo check:*)",
       "Bash(cargo clippy:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git show:*)"
     ],
     "deny": [],
     "ask": []
