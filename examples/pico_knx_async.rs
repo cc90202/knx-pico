@@ -1,18 +1,18 @@
 //! Practical example: KNX control with Pico 2 W
 //!
-//! This example demonstrates how to use AsyncTunnelClient to:
-//! - Connect to a KNX gateway via WiFi
-//! - Send GroupValue_Write commands (e.g., turn on/off lights)
-//! - Receive GroupValue_Indication events from the bus
+//! This example demonstrates how to use `AsyncTunnelClient` to:
+//! - Connect to a KNX gateway via `WiFi`
+//! - Send `GroupValue_Write` commands (e.g., turn on/off lights)
+//! - Receive `GroupValue_Indication` events from the bus
 //!
 //! ## Hardware Requirements
 //! - Raspberry Pi Pico 2 W
 //! - KNX gateway on local network OR KNX simulator (see TESTING.md)
 //!
 //! ## Configuration
-//! Edit `src/configuration.rs` to set your WiFi credentials:
-//!    - `WIFI_NETWORK`: Your WiFi network name
-//!    - `WIFI_PASSWORD`: Your WiFi password
+//! Edit `src/configuration.rs` to set your `WiFi` credentials:
+//!    - `WIFI_NETWORK`: Your `WiFi` network name
+//!    - `WIFI_PASSWORD`: Your `WiFi` password
 //!
 //! The KNX gateway is automatically discovered via multicast - no manual configuration needed!
 //!
@@ -40,7 +40,7 @@ use knx_pico::knx_discovery;
 use common::utility::{get_ssid, get_wifi_password};
 use defmt::unwrap;
 use embassy_executor::Spawner;
-use embassy_net::{Config, StackResources};
+use embassy_net::{Config, DhcpConfig, StackResources};
 use embassy_net::udp::PacketMetadata;
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Level, Output};
@@ -61,6 +61,7 @@ use embassy_rp::usb::{Driver, InterruptHandler as UsbInterruptHandler};
 
 use knx_pico::addressing::GroupAddress;
 use knx_pico::protocol::async_tunnel::AsyncTunnelClient;
+use knx_pico::net::embassy_adapter::EmbassyUdpTransport;
 use knx_pico::protocol::cemi::{ControlField1, ControlField2, Apci};
 use knx_pico::protocol::constants::CEMIMessageCode;
 use knx_pico::addressing::IndividualAddress;
@@ -152,10 +153,12 @@ async fn blink_task(shared_control: SharedControl) -> ! {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    #[allow(clippy::default_trait_access, reason = "Config name conflicts with embassy_net::Config")]
     let p = embassy_rp::init(Default::default());
 
     // Start appropriate logger based on active feature
     #[cfg(feature = "usb-logger")]
+    #[allow(clippy::semicolon_if_nothing_returned, clippy::semicolon_outside_block, reason = "Conflicting clippy suggestions")]
     {
         let driver = Driver::new(p.USB, UsbIrqs);
         spawner.must_spawn(logger_task(driver));
@@ -206,7 +209,7 @@ async fn main(spawner: Spawner) {
     // Network Stack Setup
     // ========================================================================
 
-    let config = Config::dhcpv4(Default::default());
+    let config = Config::dhcpv4(DhcpConfig::default());
     let seed = 0x1234_5678_u64;
 
     static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
@@ -237,7 +240,7 @@ async fn main(spawner: Spawner) {
             )
             .await
         {
-            Ok(_) => {
+            Ok(()) => {
                 pico_log!(info, "WiFi connected successfully!");
                 break;
             }
@@ -269,21 +272,18 @@ async fn main(spawner: Spawner) {
 
     pico_log!(info, "Discovering KNX gateway via multicast...");
 
-    let (knx_gateway_ip, knx_gateway_port) = match knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
-        Some(gateway) => {
-            pico_log!(info, "✓ KNX Gateway discovered automatically!");
-            pico_log!(info, "  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
-            pico_log!(info, "  Port: {}", gateway.port);
-            (gateway.ip, gateway.port)
-        }
-        None => {
-            pico_log!(error, "✗ No KNX gateway found on network!");
-            pico_log!(error, "  Ensure your KNX gateway or simulator is running");
-            pico_log!(error, "  and connected to the same network.");
-            pico_log!(info, "System halted. Reset device to retry.");
-            loop {
-                Timer::after(Duration::from_secs(30)).await;
-            }
+    let (knx_gateway_ip, knx_gateway_port) = if let Some(gateway) = knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
+        pico_log!(info, "✓ KNX Gateway discovered automatically!");
+        pico_log!(info, "  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
+        pico_log!(info, "  Port: {}", gateway.port);
+        (gateway.ip, gateway.port)
+    } else {
+        pico_log!(error, "✗ No KNX gateway found on network!");
+        pico_log!(error, "  Ensure your KNX gateway or simulator is running");
+        pico_log!(error, "  and connected to the same network.");
+        pico_log!(info, "System halted. Reset device to retry.");
+        loop {
+            Timer::after(Duration::from_secs(30)).await;
         }
     };
 
@@ -305,19 +305,24 @@ async fn main(spawner: Spawner) {
     let rx_buffer = RX_BUFFER.init([0u8; 2048]);
     let tx_buffer = TX_BUFFER.init([0u8; 2048]);
 
-    let mut client = AsyncTunnelClient::new(
-        &stack,
+    // Create UDP transport with embassy stack
+    let transport = EmbassyUdpTransport::new(
+        stack,
         rx_meta,
-        tx_meta,
         rx_buffer,
+        tx_meta,
         tx_buffer,
+    );
+
+    let mut client = AsyncTunnelClient::new(
+        transport,
         knx_gateway_ip,
         knx_gateway_port,
     );
 
     // Connect to gateway
     match client.connect().await {
-        Ok(_) => pico_log!(info, "✓ Connected to KNX gateway"),
+        Ok(()) => pico_log!(info, "✓ Connected to KNX gateway"),
         Err(_e) => {
             pico_log!(error, "Failed to connect to KNX gateway");
             return;
@@ -333,7 +338,7 @@ async fn main(spawner: Spawner) {
     let light_addr = ga!(1/2/3);
     let cemi_on = build_group_write_bool(light_addr, true);
     match client.send_cemi(&cemi_on).await {
-        Ok(_) => pico_log!(info, "✓ Command sent successfully"),
+        Ok(()) => pico_log!(info, "✓ Command sent successfully"),
         Err(_e) => pico_log!(error, "Failed to send command"),
     }
 
@@ -347,7 +352,7 @@ async fn main(spawner: Spawner) {
 
     let cemi_off = build_group_write_bool(light_addr, false);
     match client.send_cemi(&cemi_off).await {
-        Ok(_) => pico_log!(info, "✓ Command sent successfully"),
+        Ok(()) => pico_log!(info, "✓ Command sent successfully"),
         Err(_e) => pico_log!(error, "Failed to send command"),
     }
 
@@ -368,7 +373,7 @@ async fn main(spawner: Spawner) {
     // Example: 0x0B = 0000 1011 = increase by 4 steps
     let cemi_dim_up = build_group_write_dpt3(dimmer_addr, 0x0B);
     match client.send_cemi(&cemi_dim_up).await {
-        Ok(_) => pico_log!(info, "✓ Dimmer command sent"),
+        Ok(()) => pico_log!(info, "✓ Dimmer command sent"),
         Err(_e) => pico_log!(error, "Failed to send dimmer command"),
     }
 
@@ -386,7 +391,7 @@ async fn main(spawner: Spawner) {
     // 75% = 0xFF * 0.75 = 191 = 0xBF
     let cemi_valve = build_group_write_dpt5(valve_addr, 0xBF);
     match client.send_cemi(&cemi_valve).await {
-        Ok(_) => pico_log!(info, "✓ Valve position set to 75%"),
+        Ok(()) => pico_log!(info, "✓ Valve position set to 75%"),
         Err(_e) => pico_log!(error, "Failed to set valve position"),
     }
 
@@ -408,7 +413,7 @@ async fn main(spawner: Spawner) {
     // Encoding: 0x0C 0x66 (calculated for 21.5)
     let cemi_temp = build_group_write_dpt9(temp_addr, 0x0C, 0x66);
     match client.send_cemi(&cemi_temp).await {
-        Ok(_) => pico_log!(info, "✓ Temperature setpoint written"),
+        Ok(()) => pico_log!(info, "✓ Temperature setpoint written"),
         Err(_e) => pico_log!(error, "Failed to write temperature"),
     }
 
@@ -486,7 +491,7 @@ async fn main(spawner: Spawner) {
 // Helper Functions
 // ============================================================================
 
-/// Build a cEMI L_Data.req frame for GroupValue_Write with boolean value
+/// Build a cEMI `L_Data.req` frame for `GroupValue_Write` with boolean value
 ///
 /// This constructs a complete cEMI frame for writing a DPT 1 (boolean) value
 /// to a group address.
@@ -534,8 +539,8 @@ fn build_group_write_bool(group_addr: GroupAddress, value: bool) -> [u8; 11] {
     frame
 }
 
-/// Build a cEMI L_Data.req frame for GroupValue_Read
-#[allow(dead_code)]
+/// Build a cEMI `L_Data.req` frame for `GroupValue_Read`
+#[allow(dead_code, reason = "Utility function for testing")]
 fn build_group_read(group_addr: GroupAddress) -> [u8; 10] {
     let mut frame = [0u8; 10];
 
@@ -565,7 +570,7 @@ fn build_group_read(group_addr: GroupAddress) -> [u8; 10] {
     frame
 }
 
-/// Build a cEMI L_Data.req frame for GroupValue_Write with DPT 3 (4-bit control)
+/// Build a cEMI `L_Data.req` frame for `GroupValue_Write` with DPT 3 (4-bit control)
 ///
 /// DPT 3.007: Dimming Control
 /// DPT 3.008: Blinds Control
@@ -612,7 +617,7 @@ fn build_group_write_dpt3(group_addr: GroupAddress, value: u8) -> [u8; 11] {
     frame
 }
 
-/// Build a cEMI L_Data.req frame for GroupValue_Write with DPT 5 (8-bit unsigned)
+/// Build a cEMI `L_Data.req` frame for `GroupValue_Write` with DPT 5 (8-bit unsigned)
 ///
 /// DPT 5.001: Percentage (0-100%)
 /// DPT 5.003: Angle (0-360 degrees)
@@ -654,7 +659,7 @@ fn build_group_write_dpt5(group_addr: GroupAddress, value: u8) -> [u8; 12] {
     frame
 }
 
-/// Build a cEMI L_Data.req frame for GroupValue_Write with DPT 9 (2-byte float)
+/// Build a cEMI `L_Data.req` frame for `GroupValue_Write` with DPT 9 (2-byte float)
 ///
 /// DPT 9.001: Temperature (°C)
 /// DPT 9.004: Illuminance (lux)

@@ -42,10 +42,6 @@ use embassy_net::{
 /// - `'a` - Lifetime of the network stack
 /// - `'b` - Lifetime of the metadata and buffer arrays
 ///
-/// # Type Parameters
-///
-/// - `D` - Network driver type (e.g., `cyw43::NetDriver`)
-///
 /// # Examples
 ///
 /// ```rust,no_run
@@ -64,19 +60,22 @@ use embassy_net::{
 /// let mut tx_buffer = [0u8; TX_BUFFER_SIZE];
 ///
 /// let transport = EmbassyUdpTransport::new(
-///     &stack,
+///     stack,
 ///     &mut rx_meta,
 ///     &mut rx_buffer,
 ///     &mut tx_meta,
 ///     &mut tx_buffer,
 /// );
 /// ```
-pub struct EmbassyUdpTransport<'a, 'b, D: embassy_net::driver::Driver> {
+/// Note: Debug implementation is not provided because `UdpSocket` does not implement Debug.
+/// This is acceptable as the transport is typically used internally and not exposed to users.
+#[allow(missing_debug_implementations)]
+pub struct EmbassyUdpTransport<'a, 'b> {
     socket: UdpSocket<'a>,
-    _phantom: core::marker::PhantomData<(&'b (), D)>,
+    _phantom: core::marker::PhantomData<&'b ()>,
 }
 
-impl<'a, 'b, D: embassy_net::driver::Driver> EmbassyUdpTransport<'a, 'b, D> {
+impl<'a, 'b: 'a> EmbassyUdpTransport<'a, 'b> {
     /// Create a new Embassy UDP transport adapter.
     ///
     /// # Arguments
@@ -91,7 +90,7 @@ impl<'a, 'b, D: embassy_net::driver::Driver> EmbassyUdpTransport<'a, 'b, D> {
     ///
     /// ```rust,no_run
     /// let transport = EmbassyUdpTransport::new(
-    ///     &stack,
+    ///     stack,
     ///     &mut rx_meta,
     ///     &mut rx_buffer,
     ///     &mut tx_meta,
@@ -99,7 +98,7 @@ impl<'a, 'b, D: embassy_net::driver::Driver> EmbassyUdpTransport<'a, 'b, D> {
     /// );
     /// ```
     pub fn new(
-        stack: &'a Stack<D>,
+        stack: Stack<'a>,
         rx_meta: &'b mut [PacketMetadata],
         rx_buffer: &'b mut [u8],
         tx_meta: &'b mut [PacketMetadata],
@@ -112,6 +111,9 @@ impl<'a, 'b, D: embassy_net::driver::Driver> EmbassyUdpTransport<'a, 'b, D> {
         }
     }
 
+}
+
+impl<'a, 'b: 'a> AsyncTransport for EmbassyUdpTransport<'a, 'b> {
     /// Bind the socket to a local port.
     ///
     /// # Arguments
@@ -125,17 +127,15 @@ impl<'a, 'b, D: embassy_net::driver::Driver> EmbassyUdpTransport<'a, 'b, D> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// transport.bind(0).await?;  // Bind to any available port
-    /// transport.bind(3671).await?;  // Bind to specific KNX port
+    /// transport.bind(0)?;  // Bind to any available port
+    /// transport.bind(3671)?;  // Bind to specific KNX port
     /// ```
-    pub async fn bind(&mut self, port: u16) -> Result<()> {
+    fn bind(&mut self, port: u16) -> Result<()> {
         self.socket
             .bind(port)
             .map_err(|_| KnxError::socket_error())
     }
-}
 
-impl<'a, 'b, D: embassy_net::driver::Driver> AsyncTransport for EmbassyUdpTransport<'a, 'b, D> {
     async fn send_to(&mut self, data: &[u8], addr: IpEndpoint) -> Result<()> {
         // Convert our IpEndpoint to embassy IpEndpoint
         let embassy_addr = convert_to_embassy_endpoint(addr);
@@ -147,21 +147,21 @@ impl<'a, 'b, D: embassy_net::driver::Driver> AsyncTransport for EmbassyUdpTransp
     }
 
     async fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, IpEndpoint)> {
-        let (n, embassy_addr) = self
+        let (n, metadata) = self
             .socket
             .recv_from(buf)
             .await
             .map_err(|_| KnxError::receive_failed())?;
 
-        // Convert embassy IpEndpoint to our IpEndpoint
-        let addr = convert_from_embassy_endpoint(embassy_addr);
+        // Convert UdpMetadata endpoint to our IpEndpoint
+        let addr = convert_from_embassy_endpoint(metadata.endpoint);
 
         Ok((n, addr))
     }
 
     fn is_ready(&self) -> bool {
-        // Socket is ready if it's bound (has endpoint)
-        self.socket.endpoint().is_some()
+        // Socket is ready if it's bound (port != 0)
+        self.socket.endpoint().port != 0
     }
 
     fn close(&mut self) {
@@ -184,12 +184,9 @@ fn convert_to_embassy_endpoint(endpoint: IpEndpoint) -> EmbassyEndpoint {
 fn convert_from_embassy_endpoint(endpoint: EmbassyEndpoint) -> IpEndpoint {
     match endpoint.addr {
         IpAddress::Ipv4(addr) => {
-            let octets = addr.as_bytes();
+            let octets = addr.octets();
             IpEndpoint::new(Ipv4Addr::from([octets[0], octets[1], octets[2], octets[3]]), endpoint.port)
         }
-        // For IPv6, we'll just return unspecified for now
-        // KNXnet/IP doesn't use IPv6
-        _ => IpEndpoint::UNSPECIFIED,
     }
 }
 

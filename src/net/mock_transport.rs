@@ -38,8 +38,6 @@ use std::collections::VecDeque;
 extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::collections::VecDeque;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Mock transport for testing KNX communication without real network.
 ///

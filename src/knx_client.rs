@@ -101,12 +101,12 @@ impl fmt::Display for KnxClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotConnected => write!(f, "Not connected to KNX gateway"),
-            Self::ConnectionFailed(e) => write!(f, "Connection failed: {}", e),
-            Self::SendFailed(e) => write!(f, "Send failed: {}", e),
-            Self::ReceiveFailed(e) => write!(f, "Receive failed: {}", e),
+            Self::ConnectionFailed(e) => write!(f, "Connection failed: {e}"),
+            Self::SendFailed(e) => write!(f, "Send failed: {e}"),
+            Self::ReceiveFailed(e) => write!(f, "Receive failed: {e}"),
             Self::Timeout => write!(f, "Operation timed out"),
             Self::InvalidAddress => write!(f, "Invalid address"),
-            Self::ProtocolError(e) => write!(f, "Protocol error: {}", e),
+            Self::ProtocolError(e) => write!(f, "Protocol error: {e}"),
             Self::BufferError => write!(f, "Buffer error"),
             Self::UnsupportedOperation => write!(f, "Unsupported operation"),
         }
@@ -208,14 +208,13 @@ impl DptType {
         match (self, raw_value) {
             (DptType::Bool, KnxValue::Bool(v)) => KnxValue::Bool(v),
             // DPT 3.xxx: Convert U8 to Control3Bit
-            (DptType::Dimming, KnxValue::U8(v)) | (DptType::Blinds, KnxValue::U8(v)) => {
+            (DptType::Dimming | DptType::Blinds, KnxValue::U8(v)) => {
                 let control = (v & 0x08) != 0; // Bit 3
                 let step = v & 0x07; // Bits 2-0
                 KnxValue::Control3Bit { control, step }
             }
             // DPT 3.xxx: Already decoded
-            (DptType::Dimming, KnxValue::Control3Bit { control, step })
-            | (DptType::Blinds, KnxValue::Control3Bit { control, step }) => {
+            (DptType::Dimming | DptType::Blinds, KnxValue::Control3Bit { control, step }) => {
                 KnxValue::Control3Bit { control, step }
             }
             (DptType::Percent, KnxValue::U8(v)) => KnxValue::Percent(v.min(100)),
@@ -525,6 +524,7 @@ impl KnxClientBuilder {
     /// let builder = KnxClient::builder()
     ///     .gateway(Ipv4Addr::new(192, 168, 1, 10), 3671);
     /// ```
+    #[must_use]
     pub fn gateway(mut self, ip: [u8; 4], port: u16) -> Self {
         self.gateway_ip = ip;
         self.gateway_port = port;
@@ -544,9 +544,10 @@ impl KnxClientBuilder {
     /// let builder = KnxClient::builder()
     ///     .device_address([1, 1, 250]);  // 1.1.250
     /// ```
+    #[must_use]
     pub fn device_address(mut self, address: [u8; 3]) -> Self {
         let [area, line, device] = address;
-        self.device_address = ((area as u16) << 12) | ((line as u16) << 8) | (device as u16);
+        self.device_address = (u16::from(area) << 12) | (u16::from(line) << 8) | u16::from(device);
         self
     }
 
@@ -569,9 +570,9 @@ impl KnxClientBuilder {
     /// ```
     pub fn build_with_buffers<'a>(
         self,
-        stack: &'a embassy_net::Stack<'static>,
+        stack: embassy_net::Stack<'a>,
         buffers: &'a mut KnxBuffers,
-    ) -> Result<KnxClient<'a>> {
+    ) -> Result<KnxClient<'a, EmbassyUdpTransport<'a, 'a>>> {
         Ok(KnxClient::new_with_device(
             stack,
             &mut buffers.rx_meta,
@@ -596,14 +597,14 @@ impl KnxClientBuilder {
     /// * `tx_meta` - Transmit packet metadata buffer (minimum 4 entries)
     /// * `rx_buffer` - Receive data buffer (recommended 2048 bytes)
     /// * `tx_buffer` - Transmit data buffer (recommended 2048 bytes)
-    pub fn build<'a, D: embassy_net::driver::Driver>(
+    pub fn build<'a>(
         self,
-        stack: &'a embassy_net::Stack<D>,
+        stack: embassy_net::Stack<'a>,
         rx_meta: &'a mut [PacketMetadata],
         tx_meta: &'a mut [PacketMetadata],
         rx_buffer: &'a mut [u8],
         tx_buffer: &'a mut [u8],
-    ) -> Result<KnxClient<'a, EmbassyUdpTransport<'a, 'a, D>>> {
+    ) -> Result<KnxClient<'a, EmbassyUdpTransport<'a, 'a>>> {
         Ok(KnxClient::new_with_device(
             stack,
             rx_meta,
@@ -644,7 +645,7 @@ pub struct KnxClient<'a, T: crate::net::transport::AsyncTransport> {
     _phantom: core::marker::PhantomData<&'a ()>,
 }
 
-impl<'a, D: embassy_net::driver::Driver> KnxClient<'a, EmbassyUdpTransport<'a, 'a, D>> {
+impl<'a> KnxClient<'a, EmbassyUdpTransport<'a, 'a>> {
     /// Creates a builder for configuring a new KNX client.
     ///
     /// This is the recommended way to create a [`KnxClient`].
@@ -667,8 +668,9 @@ impl<'a, D: embassy_net::driver::Driver> KnxClient<'a, EmbassyUdpTransport<'a, '
     /// Creates a new KNX client instance with custom device address.
     ///
     /// Internal method used by the builder. Prefer using [`KnxClient::builder()`].
+    #[allow(clippy::too_many_arguments)]
     fn new_with_device(
-        stack: &'a embassy_net::Stack<D>,
+        stack: embassy_net::Stack<'a>,
         rx_meta: &'a mut [PacketMetadata],
         tx_meta: &'a mut [PacketMetadata],
         rx_buffer: &'a mut [u8],
@@ -709,7 +711,7 @@ impl<'a, D: embassy_net::driver::Driver> KnxClient<'a, EmbassyUdpTransport<'a, '
     ///
     /// New `KnxClient` instance ready to connect.
     pub fn new(
-        stack: &'a embassy_net::Stack<D>,
+        stack: embassy_net::Stack<'a>,
         rx_meta: &'a mut [PacketMetadata],
         tx_meta: &'a mut [PacketMetadata],
         rx_buffer: &'a mut [u8],
@@ -731,7 +733,7 @@ impl<'a, D: embassy_net::driver::Driver> KnxClient<'a, EmbassyUdpTransport<'a, '
 }
 
 // Generic impl block for all transport types
-impl<'a, T: crate::net::transport::AsyncTransport> KnxClient<'a, T> {
+impl<T: crate::net::transport::AsyncTransport> KnxClient<'_, T> {
     /// Registers a datapoint type for a specific group address.
     ///
     /// This allows automatic type conversion when receiving events for this address.
@@ -987,12 +989,11 @@ impl<'a, T: crate::net::transport::AsyncTransport> KnxClient<'a, T> {
                                             address: dest,
                                             value: typed_value,
                                         }));
-                                    } else {
-                                        return Ok(Some(KnxEvent::Unknown {
-                                            address: dest,
-                                            data_len: ldata.data.len(),
-                                        }));
                                     }
+                                    return Ok(Some(KnxEvent::Unknown {
+                                        address: dest,
+                                        data_len: ldata.data.len(),
+                                    }));
                                 } else if apci == 0x40 {
                                     if let Some(value) = decode_value(ldata.data) {
                                         // Apply DPT type from registry if registered
@@ -1007,12 +1008,11 @@ impl<'a, T: crate::net::transport::AsyncTransport> KnxClient<'a, T> {
                                             address: dest,
                                             value: typed_value,
                                         }));
-                                    } else {
-                                        return Ok(Some(KnxEvent::Unknown {
-                                            address: dest,
-                                            data_len: ldata.data.len(),
-                                        }));
                                     }
+                                    return Ok(Some(KnxEvent::Unknown {
+                                        address: dest,
+                                        data_len: ldata.data.len(),
+                                    }));
                                 } else if apci == 0x00 {
                                     return Ok(Some(KnxEvent::GroupRead { address: dest }));
                                 }
@@ -1185,7 +1185,7 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
         KnxValue::Bool(b) => {
             buffer[0] = 0x01;
             buffer[1] = 0x00;
-            buffer[2] = apci | if b { 0x01 } else { 0x00 };
+            buffer[2] = apci | u8::from(b);
             11
         }
         KnxValue::Control3Bit { control, step } => {
@@ -1205,7 +1205,7 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
             12
         }
         KnxValue::Percent(p) => {
-            let value = ((p.min(100) as u16 * 255) / 100) as u8;
+            let value = ((u16::from(p.min(100)) * 255) / 100) as u8;
             buffer[0] = 0x02;
             buffer[1] = 0x00;
             buffer[2] = apci;
@@ -1255,8 +1255,8 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
             // Byte 1: day (1-31)
             // Byte 2: month (1-12)
             // Byte 3: year (0-99)
-            let day = day.max(1).min(31); // Clamp to 1-31
-            let month = month.max(1).min(12); // Clamp to 1-12
+            let day = day.clamp(1, 31);
+            let month = month.clamp(1, 12);
             let year = year.min(99); // Clamp to 0-99
 
             buffer[0] = 0x04; // NPDU length (4 bytes including TPCI/APCI)
@@ -1306,8 +1306,8 @@ fn encode_value_with_apci(value: KnxValue, buffer: &mut [u8], apci: u8) -> usize
         } => {
             // DPT 19.001: 8 bytes encoding date/time with flags
             let year = year.clamp(1900, 2155) - 1900; // Year since 1900
-            let month = month.max(1).min(12);
-            let day = day.max(1).min(31);
+            let month = month.clamp(1, 12);
+            let day = day.clamp(1, 31);
             let day_of_week = day_of_week.min(7);
             let hour = hour.min(23);
             let minute = minute.min(59);
@@ -1436,7 +1436,7 @@ fn decode_value(data: &[u8]) -> Option<KnxValue> {
         3 => {
             let byte1 = data[1];
             let byte2 = data[2];
-            let raw_u16 = ((byte1 as u16) << 8) | (byte2 as u16);
+            let raw_u16 = (u16::from(byte1) << 8) | u16::from(byte2);
 
             if (raw_u16 & 0x8000) != 0 || (raw_u16 & 0x7800) != 0 {
                 let value = decode_dpt9(raw_u16);
@@ -1453,7 +1453,7 @@ fn decode_value(data: &[u8]) -> Option<KnxValue> {
             let byte2 = data[2];
             let byte3 = data[3];
 
-            if byte1 >= 1 && byte1 <= 31 && byte2 >= 1 && byte2 <= 12 && byte3 <= 99 {
+            if (1..=31).contains(&byte1) && (1..=12).contains(&byte2) && byte3 <= 99 {
                 // DPT 11.001: Date
                 // Byte 1: day (1-31)
                 // Byte 2: month (1-12)
@@ -1507,7 +1507,7 @@ fn decode_value(data: &[u8]) -> Option<KnxValue> {
             // Byte 5: Second
             // Byte 6: Flags 1
             // Byte 7: Flags 2
-            let year = 1900 + data[1] as u16;
+            let year = 1900 + u16::from(data[1]);
             let month = data[2];
             let day = data[3];
             let day_of_week = (data[4] >> 5) & 0x07;
@@ -1552,8 +1552,8 @@ fn decode_value(data: &[u8]) -> Option<KnxValue> {
 /// Decoded float value using formula: `(0.01 * mantissa) * 2^exponent`.
 fn decode_dpt9(value: u16) -> f32 {
     let sign = (value & 0x8000) != 0;
-    let exponent = ((value >> 11) & 0x0F) as i32;
-    let mantissa = (value & 0x07FF) as i32;
+    let exponent = i32::from((value >> 11) & 0x0F);
+    let mantissa = i32::from(value & 0x07FF);
 
     let mantissa = if sign { -mantissa } else { mantissa };
 
