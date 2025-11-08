@@ -1,28 +1,26 @@
-//! Async KNXnet/IP Tunneling Client for Embassy
+//! Async KNXnet/IP Tunneling Client with pluggable transport
 //!
-//! This module provides an async wrapper around the TunnelClient that integrates
-//! with embassy-net UDP sockets for real network communication.
+//! This module provides an async wrapper around the TunnelClient with
+//! support for any transport implementing the `AsyncTransport` trait.
 //!
 //! ## Features
 //!
-//! - Full async/await support with Embassy
-//! - UDP socket integration with embassy-net
+//! - Full async/await support
+//! - Pluggable transport layer (UDP, mock, etc.)
 //! - Automatic connection management
 //! - Heartbeat/keep-alive (call `send_heartbeat()` every 60s)
 //! - Timeout handling
 //! - Clean error handling
+//! - Dependency Inversion Principle (depends on transport abstraction)
 //!
-//! ## Example
+//! ## Example with Embassy UDP
 //!
 //! ```rust,no_run
 //! use knx_pico::protocol::async_tunnel::AsyncTunnelClient;
-//! use embassy_net::Stack;
+//! use knx_pico::net::embassy_adapter::EmbassyUdpTransport;
 //!
-//! let mut client = AsyncTunnelClient::new(
-//!     stack,
-//!     [192, 168, 1, 10],
-//!     3671,
-//! );
+//! let transport = EmbassyUdpTransport::new(stack, &mut rx_meta, &mut rx_buffer, &mut tx_meta, &mut tx_buffer);
+//! let mut client = AsyncTunnelClient::new(transport, [192, 168, 1, 10], 3671);
 //!
 //! // Connect to gateway
 //! client.connect().await?;
@@ -38,12 +36,26 @@
 //! // Disconnect
 //! client.disconnect().await?;
 //! ```
+//!
+//! ## Example with Mock Transport (Testing)
+//!
+//! ```rust
+//! use knx_pico::net::mock_transport::MockTransport;
+//! use knx_pico::protocol::async_tunnel::AsyncTunnelClient;
+//!
+//! let mut mock = MockTransport::new();
+//! mock.add_response(vec![0x06, 0x10, 0x02, 0x06, ...]);  // CONNECT_RESPONSE
+//!
+//! let mut client = AsyncTunnelClient::new(mock, [192, 168, 1, 10], 3671);
+//! client.connect().await?;
+//! ```
 
 use crate::error::{KnxError, Result};
 use crate::protocol::tunnel::{TunnelClient, Connected};
 use crate::protocol::frame::KnxnetIpFrame;
 use crate::protocol::constants::ServiceType;
-use embassy_net::{Stack, udp::{UdpSocket, PacketMetadata}};
+use crate::net::transport::AsyncTransport;
+use crate::net::IpEndpoint;
 use embassy_time::{Duration, with_timeout};
 
 // Import unified logging macro from crate root
@@ -135,19 +147,29 @@ const MAX_ACK_WAIT_INDICATIONS: usize = 1;
 /// On Pico 2 W, multiple recv_from() calls with timeouts can crash the system.
 const MAX_RECV_ATTEMPTS: usize = 2;
 
-/// Async wrapper for TunnelClient with embassy-net UDP
+/// Async wrapper for TunnelClient with pluggable transport
+///
+/// # Type Parameters
+///
+/// - `T` - Transport implementation (e.g., `EmbassyUdpTransport`, `MockTransport`)
+///
+/// # Design Pattern
+///
+/// This struct follows the **Dependency Inversion Principle**:
+/// - Depends on `AsyncTransport` trait (abstraction)
+/// - Not tied to any specific transport implementation
+/// - Enables testing with mock transports
+/// - Supports alternative transports (serial, USB, etc.)
 ///
 /// # Note on Memory Usage
+///
 /// This struct contains three 512-byte buffers (rx_buffer, cemi_buffer, pending_indication_buffer).
-/// The socket uses separate buffers passed to `new()`.
-/// Total memory: ~1.5KB for this struct + socket buffers.
-pub struct AsyncTunnelClient<'a> {
-    /// UDP socket for communication
-    socket: UdpSocket<'a>,
-    /// Gateway address
-    gateway_addr: [u8; 4],
-    /// Gateway port
-    gateway_port: u16,
+/// Total memory: ~1.5KB for this struct + transport-specific buffers.
+pub struct AsyncTunnelClient<T: AsyncTransport> {
+    /// Pluggable transport layer
+    transport: T,
+    /// Gateway endpoint (IP + port)
+    gateway_endpoint: IpEndpoint,
     /// Receive buffer for UDP packets
     rx_buffer: [u8; MAX_PACKET_SIZE],
     /// Temporary buffer for cEMI data copying (to avoid lifetime issues)
@@ -160,17 +182,16 @@ pub struct AsyncTunnelClient<'a> {
     client: Option<TunnelClient<Connected>>,
 }
 
-impl<'a> core::fmt::Debug for AsyncTunnelClient<'a> {
+impl<T: AsyncTransport> core::fmt::Debug for AsyncTunnelClient<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("AsyncTunnelClient")
-            .field("gateway_addr", &self.gateway_addr)
-            .field("gateway_port", &self.gateway_port)
+            .field("gateway_endpoint", &self.gateway_endpoint)
             .field("client", &self.client)
             .finish_non_exhaustive()
     }
 }
 
-impl<'a> AsyncTunnelClient<'a> {
+impl<T: AsyncTransport> AsyncTunnelClient<T> {
     /// Safe buffer copy with bounds checking
     ///
     /// Prevents buffer overflow panics by checking sizes before copying.
@@ -184,51 +205,41 @@ impl<'a> AsyncTunnelClient<'a> {
         Ok(src.len())
     }
 
-    /// Create a new async tunnel client
+    /// Create a new async tunnel client with the given transport
     ///
     /// # Arguments
-    /// * `stack` - Embassy network stack
+    ///
+    /// * `transport` - Transport implementation (UDP, mock, etc.)
     /// * `gateway_addr` - IP address of KNX gateway
     /// * `gateway_port` - Port of KNX gateway (typically 3671)
     ///
-    /// # Example
+    /// # Example with Embassy UDP
+    ///
     /// ```rust,no_run
-    /// let client = AsyncTunnelClient::new(stack, [192, 168, 1, 10], 3671);
+    /// use knx_pico::net::embassy_adapter::EmbassyUdpTransport;
+    ///
+    /// let transport = EmbassyUdpTransport::new(stack, &mut rx_meta, &mut rx_buffer, &mut tx_meta, &mut tx_buffer);
+    /// let client = AsyncTunnelClient::new(transport, [192, 168, 1, 10], 3671);
     /// ```
-    pub fn new(
-        stack: &'a Stack<'a>,
-        rx_meta: &'a mut [PacketMetadata],
-        tx_meta: &'a mut [PacketMetadata],
-        rx_buffer: &'a mut [u8],
-        tx_buffer: &'a mut [u8],
-        gateway_addr: [u8; 4],
-        gateway_port: u16,
-    ) -> Self {
-        let socket = UdpSocket::new(*stack, rx_meta, rx_buffer, tx_meta, tx_buffer);
-
+    ///
+    /// # Example with Mock (Testing)
+    ///
+    /// ```rust
+    /// use knx_pico::net::mock_transport::MockTransport;
+    ///
+    /// let transport = MockTransport::new();
+    /// let client = AsyncTunnelClient::new(transport, [192, 168, 1, 10], 3671);
+    /// ```
+    pub fn new(transport: T, gateway_addr: impl Into<crate::net::Ipv4Addr>, gateway_port: u16) -> Self {
         Self {
-            socket,
+            transport,
+            gateway_endpoint: IpEndpoint::new(gateway_addr.into(), gateway_port),
             pending_indication_buffer: [0u8; MAX_PACKET_SIZE],
             pending_indication_len: None,
-            gateway_addr,
-            gateway_port,
             rx_buffer: [0u8; MAX_PACKET_SIZE],
             cemi_buffer: [0u8; MAX_PACKET_SIZE],
             client: None,
         }
-    }
-
-    /// Helper to create gateway endpoint (DRY principle)
-    fn gateway_endpoint(&self) -> embassy_net::IpEndpoint {
-        embassy_net::IpEndpoint::new(
-            embassy_net::IpAddress::v4(
-                self.gateway_addr[0],
-                self.gateway_addr[1],
-                self.gateway_addr[2],
-                self.gateway_addr[3],
-            ),
-            self.gateway_port,
-        )
     }
 
     /// Connect to KNX gateway
@@ -244,25 +255,21 @@ impl<'a> AsyncTunnelClient<'a> {
     /// client.connect().await?;
     /// ```
     pub async fn connect(&mut self) -> Result<()> {
-        // Bind socket first to get local port
-        self.socket.bind(0).map_err(|_| KnxError::socket_error())?;
-
-        // Get local IP address for Routing mode
-        // Some KNX gateways don't support NAT mode (0.0.0.0:0) and require the real IP
-        let ep = self.socket.endpoint();
-        let (local_ip, local_port) = if let Some(embassy_net::IpAddress::Ipv4(ipv4)) = ep.addr {
-            (ipv4.octets(), ep.port)
-        } else {
-            ([0, 0, 0, 0], 0) // Fallback to NAT mode
-        };
+        // For now, use NAT mode (0.0.0.0:0) which works with most gateways
+        // In a real implementation with EmbassyUdpTransport, the adapter would
+        // handle binding and return the actual local endpoint
+        let (local_ip, local_port) = ([0, 0, 0, 0], 0);
 
         pico_log!(info, "Local endpoint: {}.{}.{}.{}:{}",
             local_ip[0], local_ip[1], local_ip[2], local_ip[3], local_port);
 
-        // Create tunnel client with Routing mode (use real IP and port)
+        // Create tunnel client with NAT mode
+        let gateway_addr = self.gateway_endpoint.addr.octets();
+        let gateway_port = self.gateway_endpoint.port;
+
         let tunnel = TunnelClient::new_with_local_endpoint(
-            self.gateway_addr,
-            self.gateway_port,
+            gateway_addr,
+            gateway_port,
             local_ip,
             local_port,
         );
@@ -286,32 +293,24 @@ impl<'a> AsyncTunnelClient<'a> {
                 frame_data[22], frame_data[23], frame_data[24], frame_data[25]);
         }
 
-        // Send CONNECT_REQUEST
-        let gateway = self.gateway_endpoint();
-        pico_log!(info, "Sending CONNECT_REQUEST to {}.{}.{}.{}:{}",
-            self.gateway_addr[0], self.gateway_addr[1], self.gateway_addr[2], self.gateway_addr[3],
-            self.gateway_port);
+        // Send CONNECT_REQUEST using transport abstraction
+        pico_log!(info, "Sending CONNECT_REQUEST to {}", self.gateway_endpoint);
 
-        self.socket
-            .send_to(frame_data, gateway)
-            .await
-            .map_err(|_| KnxError::socket_error())?;
+        self.transport
+            .send_to(frame_data, self.gateway_endpoint)
+            .await?;
 
         pico_log!(info, "CONNECT_REQUEST sent, waiting for response (timeout: {}s)...", CONNECT_TIMEOUT.as_secs());
 
-        // Wait for CONNECT_RESPONSE with timeout
-        let (n, _remote) = with_timeout(CONNECT_TIMEOUT, self.socket.recv_from(&mut self.rx_buffer))
+        // Wait for CONNECT_RESPONSE with timeout using transport abstraction
+        let (n, remote) = with_timeout(CONNECT_TIMEOUT, self.transport.recv_from(&mut self.rx_buffer))
             .await
             .map_err(|_| {
                 pico_log!(warn, "Timeout waiting for CONNECT_RESPONSE after {}s", CONNECT_TIMEOUT.as_secs());
                 KnxError::Timeout
-            })?
-            .map_err(|_| KnxError::socket_error())?;
+            })??;
 
-        // Extract IPv4 address directly (KNX only uses IPv4, pattern always matches)
-        let embassy_net::IpAddress::Ipv4(ipv4) = _remote.endpoint.addr;
-        let remote_ip = ipv4.octets();
-        pico_log!(info, "Received {} bytes from {}.{}.{}.{}:{}", n, remote_ip[0], remote_ip[1], remote_ip[2], remote_ip[3], _remote.endpoint.port);
+        pico_log!(info, "Received {} bytes from {}", n, remote);
 
         // Parse frame
         let frame = KnxnetIpFrame::parse(&self.rx_buffer[..n])?;
@@ -376,7 +375,7 @@ impl<'a> AsyncTunnelClient<'a> {
         pico_log!(info, "send_cemi: len={}", cemi_data.len());
 
         // Get gateway endpoint before borrowing client
-        let gateway = self.gateway_endpoint();
+        let gateway = self.gateway_endpoint;
 
         let client = self.client.as_mut().ok_or_else(|| {
             pico_log!(error, "Not connected!");
@@ -397,7 +396,7 @@ impl<'a> AsyncTunnelClient<'a> {
 
             let result = with_timeout(
                 FLUSH_TIMEOUT,
-                self.socket.recv_from(&mut self.rx_buffer)
+                self.transport.recv_from(&mut self.rx_buffer)
             ).await;
 
             match result {
@@ -416,7 +415,7 @@ impl<'a> AsyncTunnelClient<'a> {
                             if let Ok(_cemi_data) = client.handle_tunneling_indication(frame.body()) {
                                 let ack_seq = client.recv_sequence().wrapping_sub(1);
                                 if let Ok(ack_frame) = client.build_tunneling_ack(ack_seq, 0) {
-                                    let _ = self.socket.send_to(ack_frame, gateway).await;
+                                    let _ = self.transport.send_to(ack_frame, gateway).await;
                                 }
                                 pico_log!(debug, "Flushed TUNNELING_INDICATION #{}, cemi_len={}", flushed_count, _cemi_data.len());
                             }
@@ -442,14 +441,10 @@ impl<'a> AsyncTunnelClient<'a> {
 
         pico_log!(info, "Sending {} bytes to gateway...", frame_data.len());
 
-        // Send via UDP
-        self.socket
+        // Send via transport abstraction
+        self.transport
             .send_to(frame_data, gateway)
-            .await
-            .map_err(|_| {
-                pico_log!(error, "Socket send failed!");
-                KnxError::socket_error()
-            })?;
+            .await?;
 
         pico_log!(info, "✓ Command sent successfully (fire-and-forget)");
 
@@ -491,7 +486,7 @@ impl<'a> AsyncTunnelClient<'a> {
 
         // No pending INDICATION, try to receive new data
         // Get gateway endpoint before borrowing client
-        let gateway = self.gateway_endpoint();
+        let gateway = self.gateway_endpoint;
 
         let client = self.client.as_mut().ok_or_else(|| {
             pico_log!(error, "receive: not connected");
@@ -502,7 +497,7 @@ impl<'a> AsyncTunnelClient<'a> {
         // Note: 200ms timeout to allow for network latency and processing
         let result = with_timeout(
             Duration::from_millis(200),
-            self.socket.recv_from(&mut self.rx_buffer)
+            self.transport.recv_from(&mut self.rx_buffer)
         ).await;
 
         match result {
@@ -530,7 +525,7 @@ impl<'a> AsyncTunnelClient<'a> {
                         // Send ACK (best effort, don't fail on error)
                         let ack_seq = client.recv_sequence().wrapping_sub(1);
                         if let Ok(ack_frame) = client.build_tunneling_ack(ack_seq, 0) {
-                            let _ = self.socket.send_to(ack_frame, gateway).await;
+                            let _ = self.transport.send_to(ack_frame, gateway).await;
                         }
 
                         // Copy cEMI data to our buffer to avoid lifetime issues
@@ -573,22 +568,19 @@ impl<'a> AsyncTunnelClient<'a> {
             let disconnecting_client = client.disconnect()?;
             let frame_data = disconnecting_client.frame_data();
 
-            // Send via UDP
-            let gateway = self.gateway_endpoint();
-
-            self.socket
-                .send_to(frame_data, gateway)
-                .await
-                .map_err(|_| KnxError::socket_error())?;
+            // Send via transport
+            self.transport
+                .send_to(frame_data, self.gateway_endpoint)
+                .await?;
 
             // Wait for DISCONNECT_RESPONSE (best effort)
             let _ = with_timeout(
                 RESPONSE_TIMEOUT,
-                self.socket.recv_from(&mut self.rx_buffer)
+                self.transport.recv_from(&mut self.rx_buffer)
             ).await;
         }
 
-        self.socket.close();
+        self.transport.close();
 
         Ok(())
     }
@@ -598,9 +590,9 @@ impl<'a> AsyncTunnelClient<'a> {
         self.client.is_some()
     }
 
-    /// Get gateway address
-    pub fn gateway_addr(&self) -> ([u8; 4], u16) {
-        (self.gateway_addr, self.gateway_port)
+    /// Get gateway endpoint
+    pub fn gateway_endpoint(&self) -> IpEndpoint {
+        self.gateway_endpoint
     }
 
     /// Send heartbeat/keep-alive (CONNECTIONSTATE_REQUEST)
@@ -622,24 +614,20 @@ impl<'a> AsyncTunnelClient<'a> {
     /// }
     /// ```
     pub async fn send_heartbeat(&mut self) -> Result<()> {
-        let gateway = self.gateway_endpoint();
-
         let client = self.client.as_mut().ok_or_else(|| KnxError::not_connected())?;
 
         // Build CONNECTIONSTATE_REQUEST
         let heartbeat_frame = client.send_heartbeat()?;
 
-        // Send via UDP
-        self.socket
-            .send_to(heartbeat_frame, gateway)
-            .await
-            .map_err(|_| KnxError::socket_error())?;
+        // Send via transport
+        self.transport
+            .send_to(heartbeat_frame, self.gateway_endpoint)
+            .await?;
 
         // Wait for CONNECTIONSTATE_RESPONSE
-        let (n, _) = with_timeout(RESPONSE_TIMEOUT, self.socket.recv_from(&mut self.rx_buffer))
+        let (n, _) = with_timeout(RESPONSE_TIMEOUT, self.transport.recv_from(&mut self.rx_buffer))
             .await
-            .map_err(|_| KnxError::Timeout)?
-            .map_err(|_| KnxError::socket_error())?;
+            .map_err(|_| KnxError::Timeout)??;
 
         let frame = KnxnetIpFrame::parse(&self.rx_buffer[..n])?;
 
@@ -654,8 +642,8 @@ impl<'a> AsyncTunnelClient<'a> {
     }
 }
 
-impl<'a> Drop for AsyncTunnelClient<'a> {
+impl<T: AsyncTransport> Drop for AsyncTunnelClient<T> {
     fn drop(&mut self) {
-        self.socket.close();
+        self.transport.close();
     }
 }

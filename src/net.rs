@@ -4,6 +4,16 @@
 //! in a `no_std` environment, following the `impl Into<T>` pattern
 //! for better API ergonomics.
 
+pub mod transport;
+
+// Embassy adapter (only when embassy features are enabled)
+#[cfg(any(feature = "embassy-rp", feature = "embassy-rp-usb"))]
+pub mod embassy_adapter;
+
+// Mock transport (only in tests or when std is available)
+#[cfg(any(test, feature = "std"))]
+pub mod mock_transport;
+
 use core::fmt;
 
 /// IPv4 address representation.
@@ -153,6 +163,82 @@ impl core::str::FromStr for Ipv4Addr {
         }
 
         Ok(Self { octets })
+    }
+}
+
+/// IP endpoint (address + port) for network communication.
+///
+/// Represents a complete network endpoint with both IP address and port number.
+/// Used primarily for UDP socket operations in KNXnet/IP communication.
+///
+/// # Examples
+///
+/// ```
+/// use knx_pico::net::{IpEndpoint, Ipv4Addr};
+///
+/// let endpoint = IpEndpoint::new(Ipv4Addr::new(192, 168, 1, 10), 3671);
+/// assert_eq!(endpoint.addr.octets(), [192, 168, 1, 10]);
+/// assert_eq!(endpoint.port, 3671);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct IpEndpoint {
+    /// IP address
+    pub addr: Ipv4Addr,
+    /// Port number
+    pub port: u16,
+}
+
+impl IpEndpoint {
+    /// Create a new IP endpoint.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use knx_pico::net::{IpEndpoint, Ipv4Addr};
+    ///
+    /// let endpoint = IpEndpoint::new(Ipv4Addr::new(192, 168, 1, 10), 3671);
+    /// ```
+    #[inline]
+    pub const fn new(addr: Ipv4Addr, port: u16) -> Self {
+        Self { addr, port }
+    }
+
+    /// Create an unspecified endpoint (0.0.0.0:0).
+    ///
+    /// Useful for NAT mode or when the endpoint is not yet known.
+    pub const UNSPECIFIED: Self = Self {
+        addr: Ipv4Addr::UNSPECIFIED,
+        port: 0,
+    };
+}
+
+impl Default for IpEndpoint {
+    fn default() -> Self {
+        Self::UNSPECIFIED
+    }
+}
+
+impl From<([u8; 4], u16)> for IpEndpoint {
+    #[inline]
+    fn from((addr, port): ([u8; 4], u16)) -> Self {
+        Self {
+            addr: Ipv4Addr::from(addr),
+            port,
+        }
+    }
+}
+
+impl From<(Ipv4Addr, u16)> for IpEndpoint {
+    #[inline]
+    fn from((addr, port): (Ipv4Addr, u16)) -> Self {
+        Self { addr, port }
+    }
+}
+
+impl fmt::Display for IpEndpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.addr, self.port)
     }
 }
 
