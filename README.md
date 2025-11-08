@@ -176,16 +176,18 @@ probe-rs run --chip RP2350 \
 See `.cargo/config.toml` for all commands:
 
 ```bash
-# Examples
-cargo flash-example-usb          # Flash pico_knx_async (USB logger)
-cargo flash-sniffer-usb-release  # Flash knx_sniffer (USB logger)
+# Examples with USB logger
+cargo flash-example-usb              # Flash pico_knx_async
+cargo flash-sniffer-usb-release      # Flash knx_sniffer
+cargo flash-main-app-usb-release     # Flash knx_main_application
 
 # Library checks
-cargo check-rp2040              # Check for RP2040 target
-cargo test-host-release         # Run host tests (optimized)
+cargo check-rp2040                   # Check for RP2040 target (defmt)
+cargo check-rp2040-usb               # Check for RP2040 target (USB logger)
+cargo test-host-release              # Run host tests (optimized)
 
 # Full verification
-./check-all.sh                  # Run all checks
+./check-all.sh                       # Run all checks
 ```
 
 ## Testing

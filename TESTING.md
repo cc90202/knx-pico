@@ -223,6 +223,11 @@ cargo flash-sniffer-usb-release      # Flash to Pico
 cargo check-sniffer                  # Check compilation
 cargo build-sniffer-release          # Build release
 cargo flash-sniffer-release          # Flash to Pico
+
+# Main application template
+cargo check-main-app-usb             # Check compilation
+cargo build-main-app-usb-release     # Build release
+cargo flash-main-app-usb-release     # Flash to Pico
 ```
 
 **Usage:**

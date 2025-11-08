@@ -17,6 +17,25 @@ The simulator must be running before executing any examples. See [../TESTING.md]
 
 ## Examples
 
+### `knx_main_application.rs`
+
+Minimal application template for starting new projects with KNX-Pico. This example provides only the basic setup (WiFi connection, network initialization, heartbeat) without KNX communication. Use it as a starting point for building your own KNX applications.
+
+**Features:**
+- WiFi connection with CYW43 driver
+- DHCP IP assignment
+- System heartbeat every 30 seconds
+- USB or defmt logging support
+
+**Running:**
+```bash
+# Flash with USB logger
+cargo flash-main-app-usb-release
+
+# Monitor output
+screen /dev/tty.usbmodem* 115200
+```
+
 ### `pico_knx_async.rs`
 
 Complete example showing KNX communication with Raspberry Pi Pico 2 W over WiFi.
@@ -255,6 +274,12 @@ cargo flash-sniffer-usb-release
 
 # defmt logger (requires probe)
 cargo flash-sniffer-release
+```
+
+**knx_main_application:**
+```bash
+# USB logger (recommended)
+cargo flash-main-app-usb-release
 ```
 
 ### Manual Build Process
