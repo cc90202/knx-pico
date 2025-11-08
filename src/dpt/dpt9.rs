@@ -34,14 +34,15 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_pico::dpt::Dpt9;
+//! use knx_pico::dpt::{Dpt9, DptEncode, DptDecode};
 //!
-//! // Encode temperature
-//! let bytes = Dpt9::Temperature.encode_to_bytes(21.5)?;
-//! // bytes = [0x0C, 0x1A]
+//! // Encode temperature using trait
+//! let mut buf = [0u8; 2];
+//! let len = Dpt9::Temperature.encode(21.5, &mut buf)?;
+//! // buf[..len] contains encoded value
 //!
 //! // Decode
-//! let temp = Dpt9::Temperature.decode_from_bytes(&bytes)?;
+//! let temp = Dpt9::Temperature.decode(&buf)?;
 //! // temp ≈ 21.5
 //! ```
 
@@ -126,78 +127,6 @@ impl Dpt9 {
         }
     }
 
-    /// Encode f32 to 2-byte KNX float format
-    ///
-    /// # Arguments
-    /// * `value` - The floating point value to encode
-    ///
-    /// # Returns
-    /// A 2-byte array [`high_byte`, `low_byte`]
-    ///
-    /// # Errors
-    /// Returns `DptValueOutOfRange` if value is out of representable range
-    pub fn encode_to_bytes(&self, value: f32) -> Result<[u8; 2]> {
-        // Handle special case of zero
-        if value == 0.0 {
-            return Ok([0x00, 0x00]);
-        }
-
-        // Value = (0.01 * mantissa) * 2^exponent
-        // So: mantissa = value * 100 / 2^exponent
-        //
-        // mantissa is 11-bit two's complement: -2048 to 2047
-
-        // Find the appropriate exponent (0-15)
-        // Mantissa is 11-bit two's complement: -2048 to +2047
-        // But we need to stay within the ACTUALLY representable range:
-        // Positive: 0 to 2047 (0x000 to 0x7FF, but 0x400-0x7FF are negative in 11-bit!)
-        // So positive range is actually: 0 to 1023 (0x000 to 0x3FF)
-        // Negative range: -1024 to -1 (0x400 to 0x7FF)
-        //
-        // Actually, let me re-read the spec. The mantissa IS signed, so:
-        // - Full range is -2048 to +2047
-        // - In 11-bit two's complement:
-        //   - 0x000 to 0x3FF = 0 to +1023
-        //   - 0x400 to 0x7FF = -1024 to -1
-        //
-        // Wait, that's only -1024 to +1023, not -2048 to +2047!
-        //
-        // Let me check: 11 bits signed = -(2^10) to +(2^10 - 1) = -1024 to +1023
-        //
-        // So the actual range is -1024 to +1023, NOT -2048 to +2047!
-        let mut exponent = 0u8;
-        let mut mantissa_f = value * 100.0;
-
-        // Scale to fit mantissa in 11-bit signed range: -1024 to +1023
-        while !(-1024.0..=1023.0).contains(&mantissa_f) && exponent < 15 {
-            exponent += 1;
-            mantissa_f = value * 100.0 / (1u32 << exponent) as f32;
-        }
-
-        // Check range
-        if !(-1024.0..=1023.0).contains(&mantissa_f) {
-            return Err(KnxError::dpt_value_out_of_range());
-        }
-
-        // Round to nearest integer (manual rounding for no_std)
-        let mantissa = if mantissa_f >= 0.0 {
-            (mantissa_f + 0.5) as i16
-        } else {
-            (mantissa_f - 0.5) as i16
-        };
-
-        // mantissa is 11-bit two's complement
-        // Just mask to 11 bits - the two's complement representation is preserved
-        let mantissa_u16 = mantissa as u16 & 0x07FF;
-
-        // Build the 16-bit value
-        // Bit 14-11: exponent (4 bits)
-        // Bit 10-0: mantissa (11 bits, two's complement)
-        let value_u16 = (u16::from(exponent) << 11) | mantissa_u16;
-
-        Ok(value_u16.to_be_bytes())
-    }
-
     /// Decode 2-byte KNX float format to f32
     ///
     /// # Arguments
@@ -233,9 +162,50 @@ impl Dpt9 {
 }
 
 impl DptEncode<f32> for Dpt9 {
-    fn encode(&self, _value: f32) -> Result<&'static [u8]> {
-        // Can't return static slice for all possible float values
-        Err(KnxError::UnsupportedOperation)
+    fn encode(&self, value: f32, buf: &mut [u8]) -> Result<usize> {
+        if buf.len() < 2 {
+            return Err(KnxError::buffer_too_small());
+        }
+
+        // Handle special case of zero
+        if value == 0.0 {
+            buf[0] = 0x00;
+            buf[1] = 0x00;
+            return Ok(2);
+        }
+
+        // Find the appropriate exponent (0-15)
+        let mut exponent = 0u8;
+        let mut mantissa_f = value * 100.0;
+
+        // Scale to fit mantissa in 11-bit signed range: -1024 to +1023
+        while !(-1024.0..=1023.0).contains(&mantissa_f) && exponent < 15 {
+            exponent += 1;
+            mantissa_f = value * 100.0 / (1u32 << exponent) as f32;
+        }
+
+        // Check range
+        if !(-1024.0..=1023.0).contains(&mantissa_f) {
+            return Err(KnxError::dpt_value_out_of_range());
+        }
+
+        // Round to nearest integer (manual rounding for no_std)
+        let mantissa = if mantissa_f >= 0.0 {
+            (mantissa_f + 0.5) as i16
+        } else {
+            (mantissa_f - 0.5) as i16
+        };
+
+        // mantissa is 11-bit two's complement
+        let mantissa_u16 = mantissa as u16 & 0x07FF;
+
+        // Build the 16-bit value
+        let value_u16 = (u16::from(exponent) << 11) | mantissa_u16;
+
+        let bytes = value_u16.to_be_bytes();
+        buf[0] = bytes[0];
+        buf[1] = bytes[1];
+        Ok(2)
     }
 }
 
@@ -255,8 +225,10 @@ mod tests {
 
     #[test]
     fn test_encode_zero() {
-        let bytes = Dpt9::Temperature.encode_to_bytes(0.0).unwrap();
-        assert_eq!(bytes, [0x00, 0x00]);
+        let mut buf = [0u8; 2];
+        let len = Dpt9::Temperature.encode(0.0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x00, 0x00]);
     }
 
     #[test]
@@ -271,8 +243,10 @@ mod tests {
         // 21.5 = 0.01 * M * 2^E
         // With E=2: M = 21.5 / 0.04 = 537.5 → 538 = 0x21A
         // Result: (2 << 11) | 0x21A = 0x121A
-        let bytes = Dpt9::Temperature.encode_to_bytes(21.5).unwrap();
-        let decoded = Dpt9::Temperature.decode_from_bytes(&bytes).unwrap();
+        let mut buf = [0u8; 2];
+        let len = Dpt9::Temperature.encode(21.5, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        let decoded = Dpt9::Temperature.decode(&buf[..len]).unwrap();
         // Just verify round-trip is close
         assert_float_eq(decoded, 21.5, 0.1);
     }
@@ -281,20 +255,24 @@ mod tests {
     #[test]
     fn test_encode_negative() {
         // -5.0°C
-        let bytes = Dpt9::Temperature.encode_to_bytes(-5.0).unwrap();
+        let mut buf = [0u8; 2];
+        let len = Dpt9::Temperature.encode(-5.0, &mut buf).unwrap();
+        assert_eq!(len, 2);
         // Expected: mantissa = -500 = 0xFE0C (in 11-bit two's complement: 0x60C)
         // With sign bit: 0x860C
-        let value = Dpt9::Temperature.decode_from_bytes(&bytes).unwrap();
+        let value = Dpt9::Temperature.decode(&buf[..len]).unwrap();
         assert_float_eq(value, -5.0, 0.01);
     }
 
     #[test]
     fn test_round_trip_temperature() {
+        let mut buf = [0u8; 2];
         let test_values = [0.0, 10.5, 21.0, -10.0, 50.0, -273.0];
 
         for &value in &test_values {
-            let bytes = Dpt9::Temperature.encode_to_bytes(value).unwrap();
-            let decoded = Dpt9::Temperature.decode_from_bytes(&bytes).unwrap();
+            let len = Dpt9::Temperature.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 2);
+            let decoded = Dpt9::Temperature.decode(&buf[..len]).unwrap();
             assert_float_eq(decoded, value, 0.1);
         }
     }
@@ -302,40 +280,50 @@ mod tests {
     #[test]
     fn test_round_trip_large_value() {
         // 1000.0 lux
-        let bytes = Dpt9::Illuminance.encode_to_bytes(1000.0).unwrap();
-        let decoded = Dpt9::Illuminance.decode_from_bytes(&bytes).unwrap();
+        let mut buf = [0u8; 2];
+        let len = Dpt9::Illuminance.encode(1000.0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        let decoded = Dpt9::Illuminance.decode(&buf[..len]).unwrap();
         assert_float_eq(decoded, 1000.0, 5.0);
     }
 
     #[test]
     fn test_round_trip_very_large_value() {
         // 100000.0 Pa (100 kPa)
-        let bytes = Dpt9::Pressure.encode_to_bytes(100000.0).unwrap();
-        let decoded = Dpt9::Pressure.decode_from_bytes(&bytes).unwrap();
+        let mut buf = [0u8; 2];
+        let len = Dpt9::Pressure.encode(100000.0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        let decoded = Dpt9::Pressure.decode(&buf[..len]).unwrap();
         assert_float_eq(decoded, 100000.0, 500.0);
     }
 
     #[test]
     fn test_encode_small_decimal() {
         // 0.5°C
-        let bytes = Dpt9::Temperature.encode_to_bytes(0.5).unwrap();
-        let decoded = Dpt9::Temperature.decode_from_bytes(&bytes).unwrap();
+        let mut buf = [0u8; 2];
+        let len = Dpt9::Temperature.encode(0.5, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        let decoded = Dpt9::Temperature.decode(&buf[..len]).unwrap();
         assert_float_eq(decoded, 0.5, 0.01);
     }
 
     #[test]
     fn test_round_trip_humidity() {
         // 65.5%
-        let bytes = Dpt9::Humidity.encode_to_bytes(65.5).unwrap();
-        let decoded = Dpt9::Humidity.decode_from_bytes(&bytes).unwrap();
+        let mut buf = [0u8; 2];
+        let len = Dpt9::Humidity.encode(65.5, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        let decoded = Dpt9::Humidity.decode(&buf[..len]).unwrap();
         assert_float_eq(decoded, 65.5, 0.5);
     }
 
     #[test]
     fn test_round_trip_wind_speed() {
         // 12.3 m/s
-        let bytes = Dpt9::WindSpeed.encode_to_bytes(12.3).unwrap();
-        let decoded = Dpt9::WindSpeed.decode_from_bytes(&bytes).unwrap();
+        let mut buf = [0u8; 2];
+        let len = Dpt9::WindSpeed.encode(12.3, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        let decoded = Dpt9::WindSpeed.decode(&buf[..len]).unwrap();
         assert_float_eq(decoded, 12.3, 0.2);
     }
 
@@ -370,12 +358,89 @@ mod tests {
     #[test]
     fn test_round_trip_precision() {
         // Test various values for round-trip accuracy
+        let mut buf = [0u8; 2];
         let test_values = [20.48, 10.76, -100.0, 0.5, -0.5];
         for &value in &test_values {
-            let bytes = Dpt9::Temperature.encode_to_bytes(value).unwrap();
-            let decoded = Dpt9::Temperature.decode_from_bytes(&bytes).unwrap();
+            let len = Dpt9::Temperature.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 2);
+            let decoded = Dpt9::Temperature.decode(&buf[..len]).unwrap();
             // Allow some tolerance due to limited precision
             assert_float_eq(decoded, value, value.abs() * 0.01 + 0.1);
         }
     }
+
+    // =========================================================================
+    // DptEncode Trait Tests
+    // =========================================================================
+
+    #[test]
+    fn test_trait_encode_basic() {
+        let mut buf = [0u8; 2];
+
+        let len = Dpt9::Temperature.encode(21.5, &mut buf).unwrap();
+        assert_eq!(len, 2);
+
+        let decoded = Dpt9::Temperature.decode(&buf).unwrap();
+        assert_float_eq(decoded, 21.5, 0.1);
+    }
+
+    #[test]
+    fn test_trait_encode_zero() {
+        let mut buf = [0u8; 2];
+
+        let len = Dpt9::Temperature.encode(0.0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(buf, [0x00, 0x00]);
+    }
+
+    #[test]
+    fn test_trait_encode_buffer_too_small() {
+        let mut buf = [0u8; 1];
+        let result = Dpt9::Temperature.encode(21.5, &mut buf);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), KnxError::Transport(_)));
+
+        let mut buf = [0u8; 0];
+        let result = Dpt9::Temperature.encode(21.5, &mut buf);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), KnxError::Transport(_)));
+    }
+
+    #[test]
+    fn test_trait_encode_round_trip() {
+        let mut buf = [0u8; 2];
+        let test_values = [0.0, 10.5, 21.0, -10.0, 50.0, -273.0, 1000.0];
+
+        for &value in &test_values {
+            let len = Dpt9::Temperature.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 2);
+
+            let decoded = Dpt9::Temperature.decode(&buf[..len]).unwrap();
+            assert_float_eq(decoded, value, value.abs() * 0.01 + 0.5);
+        }
+    }
+
+    #[test]
+    fn test_trait_encode_negative() {
+        let mut buf = [0u8; 2];
+
+        let len = Dpt9::Temperature.encode(-5.0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+
+        let decoded = Dpt9::Temperature.decode(&buf).unwrap();
+        assert_float_eq(decoded, -5.0, 0.01);
+    }
+
+    #[test]
+    fn test_trait_encode_large_values() {
+        let mut buf = [0u8; 2];
+
+        // 100000 Pa
+        let len = Dpt9::Pressure.encode(100000.0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+
+        let decoded = Dpt9::Pressure.decode(&buf).unwrap();
+        assert_float_eq(decoded, 100000.0, 500.0);
+    }
+
 }

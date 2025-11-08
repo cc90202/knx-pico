@@ -21,20 +21,21 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_pico::dpt::{Dpt13, DptDecode};
+//! use knx_pico::dpt::{Dpt13, DptDecode, DptEncode};
 //!
 //! // Decode active energy in Wh
 //! let wh = Dpt13::ActiveEnergy.decode(&[0x00, 0x07, 0xA1, 0x20])?;  // 500000 Wh
 //!
-//! // Encode flow rate (can be negative for reverse flow)
-//! let data = Dpt13::FlowRate.encode_to_bytes(-1000)?;  // Reverse flow
+//! // Encode flow rate using trait (can be negative for reverse flow)
+//! let mut buf = [0u8; 4];
+//! let len = Dpt13::FlowRate.encode(-1000, &mut buf)?;  // Reverse flow
 //!
 //! // Counter pulses (signed, can increment/decrement)
 //! let pulses = Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFF, 0xFF])?;  // -1
 //! ```
 
 use crate::error::{KnxError, Result};
-use crate::dpt::DptDecode;
+use crate::dpt::{DptDecode, DptEncode};
 
 /// DPT 13.xxx 32-bit signed types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,36 +100,6 @@ impl Dpt13 {
         (i32::MIN, i32::MAX)
     }
 
-    /// Encode an i32 value to 4 bytes (big-endian)
-    ///
-    /// # Performance
-    /// - Uses optimized big-endian conversion
-    /// - Inlined for zero-cost abstraction
-    /// - No heap allocations
-    ///
-    /// # Arguments
-    /// * `value` - The value to encode (-2^31 to 2^31-1)
-    ///
-    /// # Returns
-    /// 4-byte array in big-endian format (two's complement for negatives)
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// // Positive value
-    /// let bytes = Dpt13::ActiveEnergy.encode_to_bytes(500000)?;
-    /// assert_eq!(bytes, [0x00, 0x07, 0xA1, 0x20]);
-    ///
-    /// // Negative value
-    /// let bytes = Dpt13::FlowRate.encode_to_bytes(-1000)?;
-    /// assert_eq!(bytes, [0xFF, 0xFF, 0xFC, 0x18]);
-    /// ```
-    #[inline]
-    pub fn encode_to_bytes(&self, value: i32) -> Result<[u8; 4]> {
-        // All i32 values are valid for DPT 13.xxx
-        // to_be_bytes() handles two's complement encoding automatically
-        Ok(value.to_be_bytes())
-    }
-
     /// Decode 4 bytes (big-endian) to i32 value
     ///
     /// # Performance
@@ -174,6 +145,21 @@ impl Dpt13 {
     }
 }
 
+impl DptEncode<i32> for Dpt13 {
+    fn encode(&self, value: i32, buf: &mut [u8]) -> Result<usize> {
+        if buf.len() < 4 {
+            return Err(KnxError::buffer_too_small());
+        }
+
+        let bytes = value.to_be_bytes();
+        buf[0] = bytes[0];
+        buf[1] = bytes[1];
+        buf[2] = bytes[2];
+        buf[3] = bytes[3];
+        Ok(4)
+    }
+}
+
 impl DptDecode<i32> for Dpt13 {
     #[inline]
     fn decode(&self, data: &[u8]) -> Result<i32> {
@@ -187,38 +173,62 @@ mod tests {
 
     #[test]
     fn test_counter_encode_positive() {
+        let mut buf = [0u8; 4];
+
         // Zero
-        assert_eq!(Dpt13::Counter.encode_to_bytes(0).unwrap(), [0x00, 0x00, 0x00, 0x00]);
+        let len = Dpt13::Counter.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x00, 0x00]);
 
         // Small positive
-        assert_eq!(Dpt13::Counter.encode_to_bytes(1).unwrap(), [0x00, 0x00, 0x00, 0x01]);
+        let len = Dpt13::Counter.encode(1, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x00, 0x01]);
 
         // Medium positive
-        assert_eq!(Dpt13::Counter.encode_to_bytes(1234567).unwrap(), [0x00, 0x12, 0xD6, 0x87]);
+        let len = Dpt13::Counter.encode(1234567, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x12, 0xD6, 0x87]);
 
         // Large positive
-        assert_eq!(Dpt13::Counter.encode_to_bytes(100000000).unwrap(), [0x05, 0xF5, 0xE1, 0x00]);
+        let len = Dpt13::Counter.encode(100000000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x05, 0xF5, 0xE1, 0x00]);
 
         // Maximum positive
-        assert_eq!(Dpt13::Counter.encode_to_bytes(i32::MAX).unwrap(), [0x7F, 0xFF, 0xFF, 0xFF]);
+        let len = Dpt13::Counter.encode(i32::MAX, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x7F, 0xFF, 0xFF, 0xFF]);
     }
 
     #[test]
     fn test_counter_encode_negative() {
+        let mut buf = [0u8; 4];
+
         // -1 (all bits set in two's complement)
-        assert_eq!(Dpt13::Counter.encode_to_bytes(-1).unwrap(), [0xFF, 0xFF, 0xFF, 0xFF]);
+        let len = Dpt13::Counter.encode(-1, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF, 0xFF, 0xFF]);
 
         // Small negative
-        assert_eq!(Dpt13::Counter.encode_to_bytes(-100).unwrap(), [0xFF, 0xFF, 0xFF, 0x9C]);
+        let len = Dpt13::Counter.encode(-100, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF, 0xFF, 0x9C]);
 
         // Medium negative
-        assert_eq!(Dpt13::Counter.encode_to_bytes(-1000).unwrap(), [0xFF, 0xFF, 0xFC, 0x18]);
+        let len = Dpt13::Counter.encode(-1000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF, 0xFC, 0x18]);
 
         // Large negative
-        assert_eq!(Dpt13::Counter.encode_to_bytes(-100000000).unwrap(), [0xFA, 0x0A, 0x1F, 0x00]);
+        let len = Dpt13::Counter.encode(-100000000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0xFA, 0x0A, 0x1F, 0x00]);
 
         // Minimum (most negative)
-        assert_eq!(Dpt13::Counter.encode_to_bytes(i32::MIN).unwrap(), [0x80, 0x00, 0x00, 0x00]);
+        let len = Dpt13::Counter.encode(i32::MIN, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x80, 0x00, 0x00, 0x00]);
     }
 
     #[test]
@@ -259,20 +269,32 @@ mod tests {
 
     #[test]
     fn test_active_energy_encode() {
+        let mut buf = [0u8; 4];
+
         // 0 Wh
-        assert_eq!(Dpt13::ActiveEnergy.encode_to_bytes(0).unwrap(), [0x00, 0x00, 0x00, 0x00]);
+        let len = Dpt13::ActiveEnergy.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x00, 0x00]);
 
         // 1 kWh = 1000 Wh
-        assert_eq!(Dpt13::ActiveEnergy.encode_to_bytes(1000).unwrap(), [0x00, 0x00, 0x03, 0xE8]);
+        let len = Dpt13::ActiveEnergy.encode(1000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x03, 0xE8]);
 
         // 100 kWh = 100000 Wh
-        assert_eq!(Dpt13::ActiveEnergy.encode_to_bytes(100000).unwrap(), [0x00, 0x01, 0x86, 0xA0]);
+        let len = Dpt13::ActiveEnergy.encode(100000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x01, 0x86, 0xA0]);
 
         // 500 kWh = 500000 Wh
-        assert_eq!(Dpt13::ActiveEnergy.encode_to_bytes(500000).unwrap(), [0x00, 0x07, 0xA1, 0x20]);
+        let len = Dpt13::ActiveEnergy.encode(500000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x07, 0xA1, 0x20]);
 
         // 1 MWh = 1000000 Wh
-        assert_eq!(Dpt13::ActiveEnergy.encode_to_bytes(1000000).unwrap(), [0x00, 0x0F, 0x42, 0x40]);
+        let len = Dpt13::ActiveEnergy.encode(1000000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x0F, 0x42, 0x40]);
     }
 
     #[test]
@@ -286,20 +308,32 @@ mod tests {
 
     #[test]
     fn test_flow_rate_encode() {
+        let mut buf = [0u8; 4];
+
         // 0 l/h (no flow)
-        assert_eq!(Dpt13::FlowRate.encode_to_bytes(0).unwrap(), [0x00, 0x00, 0x00, 0x00]);
+        let len = Dpt13::FlowRate.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x00, 0x00]);
 
         // 1000 l/h (positive flow)
-        assert_eq!(Dpt13::FlowRate.encode_to_bytes(1000).unwrap(), [0x00, 0x00, 0x03, 0xE8]);
+        let len = Dpt13::FlowRate.encode(1000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x03, 0xE8]);
 
         // -1000 l/h (reverse flow)
-        assert_eq!(Dpt13::FlowRate.encode_to_bytes(-1000).unwrap(), [0xFF, 0xFF, 0xFC, 0x18]);
+        let len = Dpt13::FlowRate.encode(-1000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF, 0xFC, 0x18]);
 
         // 10000 l/h
-        assert_eq!(Dpt13::FlowRate.encode_to_bytes(10000).unwrap(), [0x00, 0x00, 0x27, 0x10]);
+        let len = Dpt13::FlowRate.encode(10000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x27, 0x10]);
 
         // -10000 l/h
-        assert_eq!(Dpt13::FlowRate.encode_to_bytes(-10000).unwrap(), [0xFF, 0xFF, 0xD8, 0xF0]);
+        let len = Dpt13::FlowRate.encode(-10000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF, 0xD8, 0xF0]);
     }
 
     #[test]
@@ -313,14 +347,22 @@ mod tests {
 
     #[test]
     fn test_reactive_energy_encode() {
+        let mut buf = [0u8; 4];
+
         // 0 VArh
-        assert_eq!(Dpt13::ReactiveEnergy.encode_to_bytes(0).unwrap(), [0x00, 0x00, 0x00, 0x00]);
+        let len = Dpt13::ReactiveEnergy.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x00, 0x00]);
 
         // 5000 VArh
-        assert_eq!(Dpt13::ReactiveEnergy.encode_to_bytes(5000).unwrap(), [0x00, 0x00, 0x13, 0x88]);
+        let len = Dpt13::ReactiveEnergy.encode(5000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x13, 0x88]);
 
         // -5000 VArh (reverse reactive energy)
-        assert_eq!(Dpt13::ReactiveEnergy.encode_to_bytes(-5000).unwrap(), [0xFF, 0xFF, 0xEC, 0x78]);
+        let len = Dpt13::ReactiveEnergy.encode(-5000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF, 0xEC, 0x78]);
     }
 
     #[test]
@@ -332,17 +374,27 @@ mod tests {
 
     #[test]
     fn test_long_delta_time_sec_encode() {
+        let mut buf = [0u8; 4];
+
         // 0 seconds
-        assert_eq!(Dpt13::LongDeltaTimeSec.encode_to_bytes(0).unwrap(), [0x00, 0x00, 0x00, 0x00]);
+        let len = Dpt13::LongDeltaTimeSec.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x00, 0x00]);
 
         // 1 hour = 3600 seconds
-        assert_eq!(Dpt13::LongDeltaTimeSec.encode_to_bytes(3600).unwrap(), [0x00, 0x00, 0x0E, 0x10]);
+        let len = Dpt13::LongDeltaTimeSec.encode(3600, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x00, 0x0E, 0x10]);
 
         // 1 day = 86400 seconds
-        assert_eq!(Dpt13::LongDeltaTimeSec.encode_to_bytes(86400).unwrap(), [0x00, 0x01, 0x51, 0x80]);
+        let len = Dpt13::LongDeltaTimeSec.encode(86400, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x00, 0x01, 0x51, 0x80]);
 
         // -1 hour (time difference in past)
-        assert_eq!(Dpt13::LongDeltaTimeSec.encode_to_bytes(-3600).unwrap(), [0xFF, 0xFF, 0xF1, 0xF0]);
+        let len = Dpt13::LongDeltaTimeSec.encode(-3600, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF, 0xF1, 0xF0]);
     }
 
     #[test]
@@ -382,35 +434,42 @@ mod tests {
 
     #[test]
     fn test_round_trip_positive() {
+        let mut buf = [0u8; 4];
         let test_values = [0, 1, 100, 1000, 10000, 100000, 1000000, i32::MAX];
 
         for value in test_values {
-            let encoded = Dpt13::Counter.encode_to_bytes(value).unwrap();
-            let decoded = Dpt13::Counter.decode(&encoded).unwrap();
+            let len = Dpt13::Counter.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 4);
+            let decoded = Dpt13::Counter.decode(&buf[..len]).unwrap();
             assert_eq!(decoded, value, "Round-trip failed for {}", value);
         }
     }
 
     #[test]
     fn test_round_trip_negative() {
+        let mut buf = [0u8; 4];
         let test_values = [-1, -100, -1000, -10000, -100000, -1000000, i32::MIN];
 
         for value in test_values {
-            let encoded = Dpt13::Counter.encode_to_bytes(value).unwrap();
-            let decoded = Dpt13::Counter.decode(&encoded).unwrap();
+            let len = Dpt13::Counter.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 4);
+            let decoded = Dpt13::Counter.decode(&buf[..len]).unwrap();
             assert_eq!(decoded, value, "Round-trip failed for {}", value);
         }
     }
 
     #[test]
     fn test_big_endian_byte_order() {
+        let mut buf = [0u8; 4];
+
         // Verify big-endian encoding
         // 0x12345678 should be [0x12, 0x34, 0x56, 0x78]
-        let encoded = Dpt13::Counter.encode_to_bytes(0x12345678).unwrap();
-        assert_eq!(encoded[0], 0x12);
-        assert_eq!(encoded[1], 0x34);
-        assert_eq!(encoded[2], 0x56);
-        assert_eq!(encoded[3], 0x78);
+        let len = Dpt13::Counter.encode(0x12345678, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(buf[0], 0x12);
+        assert_eq!(buf[1], 0x34);
+        assert_eq!(buf[2], 0x56);
+        assert_eq!(buf[3], 0x78);
 
         // Verify decoding
         assert_eq!(Dpt13::Counter.decode(&[0x12, 0x34, 0x56, 0x78]).unwrap(), 0x12345678);
@@ -418,9 +477,12 @@ mod tests {
 
     #[test]
     fn test_twos_complement_negative() {
+        let mut buf = [0u8; 4];
+
         // -1 should be all bits set (0xFF, 0xFF, 0xFF, 0xFF)
-        let encoded = Dpt13::Counter.encode_to_bytes(-1).unwrap();
-        assert_eq!(encoded, [0xFF, 0xFF, 0xFF, 0xFF]);
+        let len = Dpt13::Counter.encode(-1, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF, 0xFF, 0xFF]);
 
         // Decode it back
         assert_eq!(Dpt13::Counter.decode(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap(), -1);
@@ -428,15 +490,19 @@ mod tests {
 
     #[test]
     fn test_twos_complement_min_max() {
+        let mut buf = [0u8; 4];
+
         // i32::MIN = -2147483648 = 0x80000000
-        let encoded = Dpt13::Counter.encode_to_bytes(i32::MIN).unwrap();
-        assert_eq!(encoded, [0x80, 0x00, 0x00, 0x00]);
-        assert_eq!(Dpt13::Counter.decode(&encoded).unwrap(), i32::MIN);
+        let len = Dpt13::Counter.encode(i32::MIN, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x80, 0x00, 0x00, 0x00]);
+        assert_eq!(Dpt13::Counter.decode(&buf[..len]).unwrap(), i32::MIN);
 
         // i32::MAX = 2147483647 = 0x7FFFFFFF
-        let encoded = Dpt13::Counter.encode_to_bytes(i32::MAX).unwrap();
-        assert_eq!(encoded, [0x7F, 0xFF, 0xFF, 0xFF]);
-        assert_eq!(Dpt13::Counter.decode(&encoded).unwrap(), i32::MAX);
+        let len = Dpt13::Counter.encode(i32::MAX, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[0x7F, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(Dpt13::Counter.decode(&buf[..len]).unwrap(), i32::MAX);
     }
 
     #[test]
@@ -460,5 +526,118 @@ mod tests {
     fn test_range() {
         assert_eq!(Dpt13::Counter.range(), (i32::MIN, i32::MAX));
         assert_eq!(Dpt13::ActiveEnergy.range(), (i32::MIN, i32::MAX));
+    }
+
+    // =========================================================================
+    // DptEncode Trait Tests
+    // =========================================================================
+
+    #[test]
+    fn test_trait_encode_basic() {
+        let mut buf = [0u8; 4];
+
+        let len = Dpt13::Counter.encode(1234567, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(buf, [0x00, 0x12, 0xD6, 0x87]);
+
+        let len = Dpt13::ActiveEnergy.encode(500000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(buf, [0x00, 0x07, 0xA1, 0x20]);
+    }
+
+    #[test]
+    fn test_trait_encode_negative() {
+        let mut buf = [0u8; 4];
+
+        let len = Dpt13::Counter.encode(-1, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(buf, [0xFF, 0xFF, 0xFF, 0xFF]);
+
+        let len = Dpt13::FlowRate.encode(-1000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(buf, [0xFF, 0xFF, 0xFC, 0x18]);
+    }
+
+    #[test]
+    fn test_trait_encode_buffer_too_small() {
+        let mut buf = [0u8; 3];
+        let result = Dpt13::Counter.encode(1234, &mut buf);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), KnxError::Transport(_)));
+
+        let mut buf = [0u8; 0];
+        let result = Dpt13::Counter.encode(1234, &mut buf);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), KnxError::Transport(_)));
+    }
+
+    #[test]
+    fn test_trait_encode_round_trip_positive() {
+        let mut buf = [0u8; 4];
+        let test_values = [0, 1, 100, 1000, 10000, 100000, 1000000, i32::MAX];
+
+        for value in test_values {
+            let len = Dpt13::Counter.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 4);
+
+            let decoded = Dpt13::Counter.decode(&buf[..len]).unwrap();
+            assert_eq!(decoded, value);
+        }
+    }
+
+    #[test]
+    fn test_trait_encode_round_trip_negative() {
+        let mut buf = [0u8; 4];
+        let test_values = [-1, -100, -1000, -10000, -100000, -1000000, i32::MIN];
+
+        for value in test_values {
+            let len = Dpt13::Counter.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 4);
+
+            let decoded = Dpt13::Counter.decode(&buf[..len]).unwrap();
+            assert_eq!(decoded, value);
+        }
+    }
+
+    #[test]
+    fn test_trait_encode_big_endian() {
+        let mut buf = [0u8; 4];
+
+        let len = Dpt13::Counter.encode(0x12345678, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(buf[0], 0x12);
+        assert_eq!(buf[1], 0x34);
+        assert_eq!(buf[2], 0x56);
+        assert_eq!(buf[3], 0x78);
+    }
+
+    #[test]
+    fn test_trait_encode_matches_big_endian() {
+        let mut buf = [0u8; 4];
+        let test_values = [0, 1000, -1000, 500000, -100000, i32::MIN, i32::MAX];
+
+        for value in test_values {
+            let len = Dpt13::ActiveEnergy.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 4);
+
+            // Verify the bytes match expected big-endian encoding
+            let expected = value.to_be_bytes();
+            assert_eq!(&buf[..4], &expected);
+        }
+    }
+
+    #[test]
+    fn test_trait_encode_energy_values() {
+        let mut buf = [0u8; 4];
+
+        // 1 kWh = 1000 Wh
+        let len = Dpt13::ActiveEnergy.encode(1000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(buf, [0x00, 0x00, 0x03, 0xE8]);
+
+        // 1 MWh = 1000000 Wh
+        let len = Dpt13::ActiveEnergy.encode(1000000, &mut buf).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(buf, [0x00, 0x0F, 0x42, 0x40]);
     }
 }

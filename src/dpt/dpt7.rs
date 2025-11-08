@@ -24,20 +24,22 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use knx_pico::dpt::{Dpt7, DptDecode};
+//! use knx_pico::dpt::{Dpt7, DptDecode, DptEncode};
 //!
 //! // Decode brightness in lux
 //! let lux = Dpt7::Brightness.decode(&[0x13, 0x88])?;  // 5000 lux
 //!
-//! // Encode pulses
-//! let data = Dpt7::Pulses.encode_to_bytes(1234)?;  // [0x04, 0xD2]
+//! // Encode pulses using trait
+//! let mut buf = [0u8; 2];
+//! let len = Dpt7::Pulses.encode(1234, &mut buf)?;
+//! assert_eq!(&buf[..len], &[0x04, 0xD2]);
 //!
 //! // Color temperature
 //! let kelvin = Dpt7::ColorTemperature.decode(&[0x0F, 0xA0])?;  // 4000K
 //! ```
 
 use crate::error::{KnxError, Result};
-use crate::dpt::DptDecode;
+use crate::dpt::{DptDecode, DptEncode};
 
 /// DPT 7.xxx 16-bit unsigned types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,31 +116,6 @@ impl Dpt7 {
         (0, 65535)
     }
 
-    /// Encode a u16 value to 2 bytes (big-endian)
-    ///
-    /// # Performance
-    /// - Uses optimized big-endian conversion
-    /// - Inlined for zero-cost abstraction
-    /// - No heap allocations
-    ///
-    /// # Arguments
-    /// * `value` - The value to encode (0-65535)
-    ///
-    /// # Returns
-    /// 2-byte array in big-endian format
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// let bytes = Dpt7::Pulses.encode_to_bytes(1234)?;
-    /// assert_eq!(bytes, [0x04, 0xD2]);
-    /// ```
-    #[inline]
-    pub fn encode_to_bytes(&self, value: u16) -> Result<[u8; 2]> {
-        // All values 0-65535 are valid for DPT 7.xxx
-        // Use to_be_bytes() which compiles to optimal code on all platforms
-        Ok(value.to_be_bytes())
-    }
-
     /// Decode 2 bytes (big-endian) to u16 value
     ///
     /// # Performance
@@ -181,6 +158,19 @@ impl Dpt7 {
     }
 }
 
+impl DptEncode<u16> for Dpt7 {
+    fn encode(&self, value: u16, buf: &mut [u8]) -> Result<usize> {
+        if buf.len() < 2 {
+            return Err(KnxError::buffer_too_small());
+        }
+
+        let bytes = value.to_be_bytes();
+        buf[0] = bytes[0];
+        buf[1] = bytes[1];
+        Ok(2)
+    }
+}
+
 impl DptDecode<u16> for Dpt7 {
     #[inline]
     fn decode(&self, data: &[u8]) -> Result<u16> {
@@ -194,20 +184,32 @@ mod tests {
 
     #[test]
     fn test_pulses_encode() {
+        let mut buf = [0u8; 2];
+
         // Zero
-        assert_eq!(Dpt7::Pulses.encode_to_bytes(0).unwrap(), [0x00, 0x00]);
+        let len = Dpt7::Pulses.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x00, 0x00]);
 
         // Small value
-        assert_eq!(Dpt7::Pulses.encode_to_bytes(1).unwrap(), [0x00, 0x01]);
+        let len = Dpt7::Pulses.encode(1, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x00, 0x01]);
 
         // Medium value
-        assert_eq!(Dpt7::Pulses.encode_to_bytes(1234).unwrap(), [0x04, 0xD2]);
+        let len = Dpt7::Pulses.encode(1234, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x04, 0xD2]);
 
         // Large value
-        assert_eq!(Dpt7::Pulses.encode_to_bytes(5000).unwrap(), [0x13, 0x88]);
+        let len = Dpt7::Pulses.encode(5000, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x13, 0x88]);
 
         // Maximum value
-        assert_eq!(Dpt7::Pulses.encode_to_bytes(65535).unwrap(), [0xFF, 0xFF]);
+        let len = Dpt7::Pulses.encode(65535, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF]);
     }
 
     #[test]
@@ -230,20 +232,32 @@ mod tests {
 
     #[test]
     fn test_brightness_encode() {
+        let mut buf = [0u8; 2];
+
         // 0 lux (dark)
-        assert_eq!(Dpt7::Brightness.encode_to_bytes(0).unwrap(), [0x00, 0x00]);
+        let len = Dpt7::Brightness.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x00, 0x00]);
 
         // 1000 lux (overcast day)
-        assert_eq!(Dpt7::Brightness.encode_to_bytes(1000).unwrap(), [0x03, 0xE8]);
+        let len = Dpt7::Brightness.encode(1000, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x03, 0xE8]);
 
         // 5000 lux (office lighting)
-        assert_eq!(Dpt7::Brightness.encode_to_bytes(5000).unwrap(), [0x13, 0x88]);
+        let len = Dpt7::Brightness.encode(5000, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x13, 0x88]);
 
         // 10000 lux (bright day)
-        assert_eq!(Dpt7::Brightness.encode_to_bytes(10000).unwrap(), [0x27, 0x10]);
+        let len = Dpt7::Brightness.encode(10000, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x27, 0x10]);
 
         // 65535 lux (max)
-        assert_eq!(Dpt7::Brightness.encode_to_bytes(65535).unwrap(), [0xFF, 0xFF]);
+        let len = Dpt7::Brightness.encode(65535, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF]);
     }
 
     #[test]
@@ -257,14 +271,22 @@ mod tests {
 
     #[test]
     fn test_color_temperature_encode() {
+        let mut buf = [0u8; 2];
+
         // 2700K (warm white)
-        assert_eq!(Dpt7::ColorTemperature.encode_to_bytes(2700).unwrap(), [0x0A, 0x8C]);
+        let len = Dpt7::ColorTemperature.encode(2700, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x0A, 0x8C]);
 
         // 4000K (neutral white)
-        assert_eq!(Dpt7::ColorTemperature.encode_to_bytes(4000).unwrap(), [0x0F, 0xA0]);
+        let len = Dpt7::ColorTemperature.encode(4000, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x0F, 0xA0]);
 
         // 6500K (cool white / daylight)
-        assert_eq!(Dpt7::ColorTemperature.encode_to_bytes(6500).unwrap(), [0x19, 0x64]);
+        let len = Dpt7::ColorTemperature.encode(6500, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x19, 0x64]);
     }
 
     #[test]
@@ -276,17 +298,27 @@ mod tests {
 
     #[test]
     fn test_time_period_sec_encode() {
+        let mut buf = [0u8; 2];
+
         // 0 seconds
-        assert_eq!(Dpt7::TimePeriodSec.encode_to_bytes(0).unwrap(), [0x00, 0x00]);
+        let len = Dpt7::TimePeriodSec.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x00, 0x00]);
 
         // 1 minute = 60 seconds
-        assert_eq!(Dpt7::TimePeriodSec.encode_to_bytes(60).unwrap(), [0x00, 0x3C]);
+        let len = Dpt7::TimePeriodSec.encode(60, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x00, 0x3C]);
 
         // 1 hour = 3600 seconds
-        assert_eq!(Dpt7::TimePeriodSec.encode_to_bytes(3600).unwrap(), [0x0E, 0x10]);
+        let len = Dpt7::TimePeriodSec.encode(3600, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x0E, 0x10]);
 
         // ~18 hours (max)
-        assert_eq!(Dpt7::TimePeriodSec.encode_to_bytes(65535).unwrap(), [0xFF, 0xFF]);
+        let len = Dpt7::TimePeriodSec.encode(65535, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF]);
     }
 
     #[test]
@@ -299,17 +331,27 @@ mod tests {
 
     #[test]
     fn test_current_ma_encode() {
+        let mut buf = [0u8; 2];
+
         // 0 mA
-        assert_eq!(Dpt7::CurrentMa.encode_to_bytes(0).unwrap(), [0x00, 0x00]);
+        let len = Dpt7::CurrentMa.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x00, 0x00]);
 
         // 100 mA
-        assert_eq!(Dpt7::CurrentMa.encode_to_bytes(100).unwrap(), [0x00, 0x64]);
+        let len = Dpt7::CurrentMa.encode(100, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x00, 0x64]);
 
         // 1000 mA = 1A
-        assert_eq!(Dpt7::CurrentMa.encode_to_bytes(1000).unwrap(), [0x03, 0xE8]);
+        let len = Dpt7::CurrentMa.encode(1000, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x03, 0xE8]);
 
         // 65535 mA = 65.535A
-        assert_eq!(Dpt7::CurrentMa.encode_to_bytes(65535).unwrap(), [0xFF, 0xFF]);
+        let len = Dpt7::CurrentMa.encode(65535, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF]);
     }
 
     #[test]
@@ -322,17 +364,27 @@ mod tests {
 
     #[test]
     fn test_length_mm_encode() {
+        let mut buf = [0u8; 2];
+
         // 0 mm
-        assert_eq!(Dpt7::LengthMm.encode_to_bytes(0).unwrap(), [0x00, 0x00]);
+        let len = Dpt7::LengthMm.encode(0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x00, 0x00]);
 
         // 1 meter = 1000 mm
-        assert_eq!(Dpt7::LengthMm.encode_to_bytes(1000).unwrap(), [0x03, 0xE8]);
+        let len = Dpt7::LengthMm.encode(1000, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x03, 0xE8]);
 
         // 10 meters = 10000 mm
-        assert_eq!(Dpt7::LengthMm.encode_to_bytes(10000).unwrap(), [0x27, 0x10]);
+        let len = Dpt7::LengthMm.encode(10000, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0x27, 0x10]);
 
         // ~65 meters (max)
-        assert_eq!(Dpt7::LengthMm.encode_to_bytes(65535).unwrap(), [0xFF, 0xFF]);
+        let len = Dpt7::LengthMm.encode(65535, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(&buf[..len], &[0xFF, 0xFF]);
     }
 
     #[test]
@@ -357,22 +409,27 @@ mod tests {
 
     #[test]
     fn test_round_trip() {
+        let mut buf = [0u8; 2];
         let test_values = [0, 1, 100, 1234, 5000, 10000, 32767, 65535];
 
         for value in test_values {
-            let encoded = Dpt7::Pulses.encode_to_bytes(value).unwrap();
-            let decoded = Dpt7::Pulses.decode(&encoded).unwrap();
+            let len = Dpt7::Pulses.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 2);
+            let decoded = Dpt7::Pulses.decode(&buf[..len]).unwrap();
             assert_eq!(decoded, value, "Round-trip failed for {}", value);
         }
     }
 
     #[test]
     fn test_big_endian_byte_order() {
+        let mut buf = [0u8; 2];
+
         // Verify big-endian encoding
         // 0x1234 should be [0x12, 0x34], not [0x34, 0x12]
-        let encoded = Dpt7::Pulses.encode_to_bytes(0x1234).unwrap();
-        assert_eq!(encoded[0], 0x12);
-        assert_eq!(encoded[1], 0x34);
+        let len = Dpt7::Pulses.encode(0x1234, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(buf[0], 0x12);
+        assert_eq!(buf[1], 0x34);
 
         // Verify decoding
         assert_eq!(Dpt7::Pulses.decode(&[0x12, 0x34]).unwrap(), 0x1234);
@@ -399,5 +456,74 @@ mod tests {
         assert_eq!(Dpt7::Pulses.range(), (0, 65535));
         assert_eq!(Dpt7::Brightness.range(), (0, 65535));
         assert_eq!(Dpt7::ColorTemperature.range(), (0, 65535));
+    }
+
+    // =========================================================================
+    // DptEncode Trait Tests
+    // =========================================================================
+
+    #[test]
+    fn test_trait_encode_basic() {
+        let mut buf = [0u8; 2];
+
+        let len = Dpt7::Pulses.encode(1234, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(buf, [0x04, 0xD2]);
+
+        let len = Dpt7::Brightness.encode(5000, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(buf, [0x13, 0x88]);
+    }
+
+    #[test]
+    fn test_trait_encode_buffer_too_small() {
+        let mut buf = [0u8; 1];
+        let result = Dpt7::Pulses.encode(1234, &mut buf);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), KnxError::Transport(_)));
+
+        let mut buf = [0u8; 0];
+        let result = Dpt7::Pulses.encode(1234, &mut buf);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), KnxError::Transport(_)));
+    }
+
+    #[test]
+    fn test_trait_encode_all_values() {
+        let mut buf = [0u8; 3];
+        let test_values = [0, 1, 100, 1234, 5000, 10000, 32767, 65535];
+
+        for value in test_values {
+            let len = Dpt7::Pulses.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 2);
+
+            // Verify the bytes match expected big-endian encoding
+            let expected = value.to_be_bytes();
+            assert_eq!(&buf[..2], &expected);
+        }
+    }
+
+    #[test]
+    fn test_trait_encode_round_trip() {
+        let mut buf = [0u8; 2];
+        let test_values = [0, 1, 100, 1234, 5000, 10000, 32767, 65535];
+
+        for value in test_values {
+            let len = Dpt7::Brightness.encode(value, &mut buf).unwrap();
+            assert_eq!(len, 2);
+
+            let decoded = Dpt7::Brightness.decode(&buf[..len]).unwrap();
+            assert_eq!(decoded, value);
+        }
+    }
+
+    #[test]
+    fn test_trait_encode_big_endian() {
+        let mut buf = [0u8; 2];
+
+        let len = Dpt7::Pulses.encode(0x1234, &mut buf).unwrap();
+        assert_eq!(len, 2);
+        assert_eq!(buf[0], 0x12);
+        assert_eq!(buf[1], 0x34);
     }
 }

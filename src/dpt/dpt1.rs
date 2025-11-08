@@ -25,10 +25,11 @@
 //! use knx_pico::dpt::{Dpt1, DptEncode, DptDecode};
 //!
 //! // Turn on a switch
-//! let data = Dpt1::Switch.encode(true)?;  // [0x01]
+//! let mut buf = [0u8; 1];
+//! let len = Dpt1::Switch.encode(true, &mut buf)?;  // len = 1, buf = [0x01]
 //!
 //! // Decode
-//! let state = Dpt1::Switch.decode(&[0x01])?;  // true
+//! let state = Dpt1::Switch.decode(&buf[..len])?;  // true
 //! ```
 
 use crate::error::{KnxError, Result};
@@ -63,17 +64,14 @@ pub enum Dpt1 {
     Invert,
 }
 
-// Static constants for encoded values
-static DPT1_FALSE: [u8; 1] = [0x00];
-static DPT1_TRUE: [u8; 1] = [0x01];
-
 impl DptEncode<bool> for Dpt1 {
-    fn encode(&self, value: bool) -> Result<&'static [u8]> {
-        if value {
-            Ok(&DPT1_TRUE)
-        } else {
-            Ok(&DPT1_FALSE)
+    fn encode(&self, value: bool, buf: &mut [u8]) -> Result<usize> {
+        if buf.is_empty() {
+            return Err(KnxError::buffer_too_small());
         }
+
+        buf[0] = u8::from(value);
+        Ok(1)
     }
 }
 
@@ -135,14 +133,18 @@ mod tests {
 
     #[test]
     fn test_encode_false() {
-        let result = Dpt1::Switch.encode(false).unwrap();
-        assert_eq!(result, &[0x00]);
+        let mut buf = [0xFFu8; 2];
+        let len = Dpt1::Switch.encode(false, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0x00);
     }
 
     #[test]
     fn test_encode_true() {
-        let result = Dpt1::Switch.encode(true).unwrap();
-        assert_eq!(result, &[0x01]);
+        let mut buf = [0xFFu8; 2];
+        let len = Dpt1::Switch.encode(true, &mut buf).unwrap();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0x01);
     }
 
     #[test]
@@ -176,14 +178,16 @@ mod tests {
 
     #[test]
     fn test_round_trip() {
+        let mut buf = [0u8; 1];
+
         // false
-        let encoded = Dpt1::Bool.encode(false).unwrap();
-        let decoded = Dpt1::Bool.decode(encoded).unwrap();
+        let len = Dpt1::Bool.encode(false, &mut buf).unwrap();
+        let decoded = Dpt1::Bool.decode(&buf[..len]).unwrap();
         assert_eq!(decoded, false);
 
         // true
-        let encoded = Dpt1::Bool.encode(true).unwrap();
-        let decoded = Dpt1::Bool.decode(encoded).unwrap();
+        let len = Dpt1::Bool.encode(true, &mut buf).unwrap();
+        let decoded = Dpt1::Bool.decode(&buf[..len]).unwrap();
         assert_eq!(decoded, true);
     }
 
@@ -204,10 +208,16 @@ mod tests {
             Dpt1::Invert,
         ];
 
+        let mut buf = [0u8; 1];
         for subtype in &subtypes {
             // All subtypes should encode the same way
-            assert_eq!(subtype.encode(false).unwrap(), &[0x00]);
-            assert_eq!(subtype.encode(true).unwrap(), &[0x01]);
+            let len = subtype.encode(false, &mut buf).unwrap();
+            assert_eq!(len, 1);
+            assert_eq!(buf[0], 0x00);
+
+            let len = subtype.encode(true, &mut buf).unwrap();
+            assert_eq!(len, 1);
+            assert_eq!(buf[0], 0x01);
         }
     }
 
@@ -231,14 +241,26 @@ mod tests {
     fn test_semantic_interpretation() {
         // Test that different DPT types have different meanings
         // but same encoding
-        let switch_on = Dpt1::Switch.encode(true).unwrap();
-        let door_close = Dpt1::OpenClose.encode(true).unwrap();
+        let mut buf1 = [0u8; 1];
+        let mut buf2 = [0u8; 1];
+
+        let len1 = Dpt1::Switch.encode(true, &mut buf1).unwrap();
+        let len2 = Dpt1::OpenClose.encode(true, &mut buf2).unwrap();
 
         // Same binary representation
-        assert_eq!(switch_on, door_close);
+        assert_eq!(len1, len2);
+        assert_eq!(buf1[0], buf2[0]);
 
         // But different semantic meaning
         assert_eq!(Dpt1::Switch.labels().1, "on");
         assert_eq!(Dpt1::OpenClose.labels().1, "close");
+    }
+
+    #[test]
+    fn test_encode_buffer_too_small() {
+        let mut buf = [];
+        let result = Dpt1::Switch.encode(true, &mut buf);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), KnxError::Transport(_)));
     }
 }
