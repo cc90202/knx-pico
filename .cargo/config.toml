@@ -19,14 +19,14 @@ test-host = "test --lib --target aarch64-apple-darwin"
 test-host-release = "test --lib --release --target aarch64-apple-darwin"
 
 # Build with defmt-rtt logger (default)
-build-rp2040 = "build --bin knx-pico --features embassy-rp --target thumbv8m.main-none-eabihf"
-check-rp2040 = "check --bin knx-pico --features embassy-rp --target thumbv8m.main-none-eabihf"
-flash-rp2040 = "run --bin knx-pico --features embassy-rp --target thumbv8m.main-none-eabihf --release"
+build-rp2040 = "build --example pico_knx_async --features embassy-rp --target thumbv8m.main-none-eabihf"
+check-rp2040 = "check --example pico_knx_async --features embassy-rp --target thumbv8m.main-none-eabihf"
+flash-rp2040 = "run --example pico_knx_async --features embassy-rp --target thumbv8m.main-none-eabihf --release"
 
 # Build with USB logger (build+flash in one command)
-build-rp2040-usb = "build --bin knx-pico --features embassy-rp-usb --target thumbv8m.main-none-eabihf"
-check-rp2040-usb = "check --bin knx-pico --features embassy-rp-usb --target thumbv8m.main-none-eabihf"
-flash-rp2040-usb = "run --bin knx-pico --features embassy-rp-usb --target thumbv8m.main-none-eabihf --release"
+build-rp2040-usb = "build --example pico_knx_async --features embassy-rp-usb --target thumbv8m.main-none-eabihf"
+check-rp2040-usb = "check --example pico_knx_async --features embassy-rp-usb --target thumbv8m.main-none-eabihf"
+flash-rp2040-usb = "run --example pico_knx_async --features embassy-rp-usb --target thumbv8m.main-none-eabihf --release"
 
 # Example commands
 build-example-usb = "build --release --example pico_knx_async --target thumbv8m.main-none-eabihf --features embassy-rp-usb"
@@ -45,6 +45,13 @@ build-sniffer-release = "build --release --example knx_sniffer --target thumbv8m
 flash-sniffer = "run --example knx_sniffer --target thumbv8m.main-none-eabihf --features embassy-rp"
 flash-sniffer-release = "run --release --example knx_sniffer --target thumbv8m.main-none-eabihf --features embassy-rp"
 check-sniffer = "check --example knx_sniffer --target thumbv8m.main-none-eabihf --features embassy-rp"
+
+# KNX Main Application example with USB logger
+build-main-app-usb = "build --example knx_main_application --target thumbv8m.main-none-eabihf --features embassy-rp-usb"
+build-main-app-usb-release = "build --release --example knx_main_application --target thumbv8m.main-none-eabihf --features embassy-rp-usb"
+flash-main-app-usb = "run --example knx_main_application --target thumbv8m.main-none-eabihf --features embassy-rp-usb"
+flash-main-app-usb-release = "run --release --example knx_main_application --target thumbv8m.main-none-eabihf --features embassy-rp-usb"
+check-main-app-usb = "check --example knx_main_application --target thumbv8m.main-none-eabihf --features embassy-rp-usb"
 
 # Check all configurations
 check-all = "check --workspace --all-targets --all-features"
