@@ -29,8 +29,9 @@ The project supports two logging approaches:
 **USB Logger (Recommended - no debug probe needed):**
 ```bash
 # Flash examples with USB logger
-cargo flash-example-usb            # pico_knx_async example
-cargo flash-sniffer-usb-release    # knx_sniffer tool
+cargo flash-example-usb              # pico_knx_async example
+cargo flash-sniffer-usb-release      # knx_sniffer tool
+cargo flash-main-app-usb-release     # knx_main_application template
 
 # Monitor USB serial output
 screen /dev/tty.usbmodem* 115200

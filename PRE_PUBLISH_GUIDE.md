@@ -64,10 +64,11 @@ make docs
 cargo check --lib
 
 # Embedded targets
-cargo check-rp2040        # defmt
-cargo check-rp2040-usb    # USB logger
-cargo check-sniffer       # sniffer with defmt
-cargo check-sniffer-usb   # sniffer with USB
+cargo check-rp2040            # defmt
+cargo check-rp2040-usb        # USB logger
+cargo check-sniffer           # sniffer with defmt
+cargo check-sniffer-usb       # sniffer with USB
+cargo check-main-app-usb      # main_application with USB
 
 # Or use script
 ./check-all.sh
