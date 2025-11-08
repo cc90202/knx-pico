@@ -255,6 +255,9 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
     /// client.connect().await?;
     /// ```
     pub async fn connect(&mut self) -> Result<()> {
+        // Bind socket to any available port (NAT mode)
+        self.transport.bind(0)?;
+
         // For now, use NAT mode (0.0.0.0:0) which works with most gateways
         // In a real implementation with EmbassyUdpTransport, the adapter would
         // handle binding and return the actual local endpoint
@@ -412,12 +415,12 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
                     if let Ok(frame) = KnxnetIpFrame::parse(&self.rx_buffer[..n]) {
                         if frame.service_type() == ServiceType::TunnellingRequest {
                             // ACK the pending TUNNELING_INDICATION
-                            if let Ok(_cemi_data) = client.handle_tunneling_indication(frame.body()) {
+                            if let Ok(cemi_data) = client.handle_tunneling_indication(frame.body()) {
                                 let ack_seq = client.recv_sequence().wrapping_sub(1);
                                 if let Ok(ack_frame) = client.build_tunneling_ack(ack_seq, 0) {
                                     let _ = self.transport.send_to(ack_frame, gateway).await;
                                 }
-                                pico_log!(debug, "Flushed TUNNELING_INDICATION #{}, cemi_len={}", flushed_count, _cemi_data.len());
+                                pico_log!(debug, "Flushed TUNNELING_INDICATION #{}, cemi_len={}", flushed_count, cemi_data.len());
                             }
                         } else {
                             pico_log!(debug, "Flushed non-INDICATION packet #{}", flushed_count);
@@ -511,36 +514,33 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
                     }
                 };
 
-                match frame.service_type() {
-                    ServiceType::TunnellingRequest => {
-                        // Handle TUNNELING_INDICATION with error handling
-                        let cemi_data = match client.handle_tunneling_indication(frame.body()) {
-                            Ok(data) => data,
-                            Err(_e) => {
-                                pico_log!(warn, "receive: failed to handle INDICATION");
-                                return Ok(None);
-                            }
-                        };
-
-                        // Send ACK (best effort, don't fail on error)
-                        let ack_seq = client.recv_sequence().wrapping_sub(1);
-                        if let Ok(ack_frame) = client.build_tunneling_ack(ack_seq, 0) {
-                            let _ = self.transport.send_to(ack_frame, gateway).await;
+                if frame.service_type() == ServiceType::TunnellingRequest {
+                    // Handle TUNNELING_INDICATION with error handling
+                    let cemi_data = match client.handle_tunneling_indication(frame.body()) {
+                        Ok(data) => data,
+                        Err(_e) => {
+                            pico_log!(warn, "receive: failed to handle INDICATION");
+                            return Ok(None);
                         }
+                    };
 
-                        // Copy cEMI data to our buffer to avoid lifetime issues
-                        let len = cemi_data.len();
-
-                        pico_log!(debug, "receive: received INDICATION ({} bytes)", len);
-
-                        self.cemi_buffer[..len].copy_from_slice(cemi_data);
-
-                        Ok(Some(&self.cemi_buffer[..len]))
+                    // Send ACK (best effort, don't fail on error)
+                    let ack_seq = client.recv_sequence().wrapping_sub(1);
+                    if let Ok(ack_frame) = client.build_tunneling_ack(ack_seq, 0) {
+                        let _ = self.transport.send_to(ack_frame, gateway).await;
                     }
-                    _ => {
-                        pico_log!(debug, "receive: ignored non-INDICATION packet");
-                        Ok(None)
-                    }
+
+                    // Copy cEMI data to our buffer to avoid lifetime issues
+                    let len = cemi_data.len();
+
+                    pico_log!(debug, "receive: received INDICATION ({} bytes)", len);
+
+                    self.cemi_buffer[..len].copy_from_slice(cemi_data);
+
+                    Ok(Some(&self.cemi_buffer[..len]))
+                } else {
+                    pico_log!(debug, "receive: ignored non-INDICATION packet");
+                    Ok(None)
                 }
             }
             Ok(Err(_)) => {
@@ -614,7 +614,7 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
     /// }
     /// ```
     pub async fn send_heartbeat(&mut self) -> Result<()> {
-        let client = self.client.as_mut().ok_or_else(|| KnxError::not_connected())?;
+        let client = self.client.as_mut().ok_or_else(KnxError::not_connected)?;
 
         // Build CONNECTIONSTATE_REQUEST
         let heartbeat_frame = client.send_heartbeat()?;
@@ -633,7 +633,7 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
 
         if frame.service_type() == ServiceType::ConnectionstateResponse {
             // Handle response and check if connection is still alive
-            let connected_client = self.client.take().ok_or_else(|| KnxError::not_connected())?;
+            let connected_client = self.client.take().ok_or_else(KnxError::not_connected)?;
             let connected_client = connected_client.handle_heartbeat_response(frame.body())?;
             self.client = Some(connected_client);
         }

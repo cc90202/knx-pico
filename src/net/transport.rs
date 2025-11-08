@@ -70,6 +70,24 @@ use crate::net::IpEndpoint;
 /// ```
 #[allow(async_fn_in_trait)]
 pub trait AsyncTransport {
+    /// Bind the transport to a local port.
+    ///
+    /// # Arguments
+    ///
+    /// * `port` - Local port to bind to (0 = any available port)
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the port is already in use or binding fails.
+    ///
+    /// # Default Implementation
+    ///
+    /// Default implementation does nothing (no-op). Override if your transport
+    /// requires explicit binding before sending/receiving.
+    fn bind(&mut self, _port: u16) -> Result<()> {
+        Ok(())
+    }
+
     /// Send data to a specific network endpoint.
     ///
     /// # Arguments

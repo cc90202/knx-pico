@@ -193,7 +193,7 @@ pub async fn discover_gateway(
     // Wait for response with timeout
     let mut response_buf = [0u8; 256];
 
-    match with_timeout(timeout, async {
+    with_timeout(timeout, async {
         loop {
             if let Ok((len, _remote)) = socket.recv_from(&mut response_buf).await {
                 if let Some(gateway) = parse_search_response(&response_buf[..len]) {
@@ -202,10 +202,7 @@ pub async fn discover_gateway(
             }
             Timer::after_millis(10).await;
         }
-    }).await {
-        Ok(gateway) => gateway,
-        Err(_) => None,  // Timeout
-    }
+    }).await.unwrap_or_default()
 }
 
 /// Calculate broadcast address for a given IP and prefix length

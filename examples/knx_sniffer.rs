@@ -23,11 +23,11 @@
 
 #![no_std]
 #![no_main]
-#![allow(dead_code)]
+#![allow(dead_code, reason = "Sniffer utility with various test functions")]
 
 mod common;
 
-use common::utility::*;
+use common::utility::{get_ssid, get_wifi_password};
 use knx_pico::knx_client::{KnxClient, KnxBuffers, KnxValue, DptType};
 use knx_pico::knx_discovery;
 use cyw43::Control;
@@ -55,7 +55,7 @@ use embassy_rp::usb::{Driver, InterruptHandler as UsbInterruptHandler};
 use defmt_rtt as _;
 
 // Network stack imports
-use embassy_net::{Config, StackResources};
+use embassy_net::{Config, DhcpConfig, StackResources};
 
 // Import unified logging macro and convenience macros from knx_pico crate
 use knx_pico::{pico_log, knx_read, knx_write, ga};
@@ -84,12 +84,13 @@ bind_interrupts!(struct UsbIrqs {
 
 /// Shared structure to pass the CYW43 controller between Embassy tasks
 #[derive(Clone, Copy)]
-#[allow(missing_debug_implementations)]
+#[allow(missing_debug_implementations, reason = "Internal mutex wrapper for WiFi control")]
 pub struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static>>);
 
 /// Main entry point for Embassy executor
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    #[allow(clippy::default_trait_access, reason = "Config name conflicts with embassy_net::Config")]
     let p = embassy_rp::init(Default::default());
 
     // Start appropriate logger based on active feature
@@ -97,7 +98,7 @@ async fn main(spawner: Spawner) {
     {
         let driver = Driver::new(p.USB, UsbIrqs);
         spawner.must_spawn(logger_task(driver));
-    }
+    };
 
     if let Some(panic_message) = panic_persist::get_panic_message_utf8() {
         pico_log!(error, "{}", panic_message);
@@ -138,10 +139,10 @@ async fn main(spawner: Spawner) {
         .await;
 
     // Configure network stack with DHCP
-    let config = Config::dhcpv4(Default::default());
+    let config = Config::dhcpv4(DhcpConfig::default());
 
     // Generate random seed for network stack
-    let seed: u64 = RoscRng.next_u64();
+    let seed = RoscRng.next_u64();
     pico_log!(info, "Random seed: {}", seed);
 
     // Initialize network stack
@@ -174,7 +175,7 @@ async fn main(spawner: Spawner) {
         {
             let mut control = shared_control.0.lock().await;
             match control.join(wifi_ssid, cyw43::JoinOptions::new(wifi_password.as_bytes())).await {
-                Ok(_) => {
+                Ok(()) => {
                     pico_log!(info, "WiFi connected successfully!");
                     break;
                 }
@@ -205,21 +206,18 @@ async fn main(spawner: Spawner) {
 
     pico_log!(info, "1. Testing SEARCH_REQUEST (gateway discovery)...");
 
-    let (knx_gateway_ip, knx_gateway_port) = match knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
-        Some(gateway) => {
-            pico_log!(info, "✓ KNX Gateway discovered automatically!");
-            pico_log!(info, "  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
-            pico_log!(info, "  Port: {}", gateway.port);
-            (gateway.ip, gateway.port)
-        }
-        None => {
-            pico_log!(error, "✗ No KNX gateway found on network!");
-            pico_log!(error, "  Ensure your KNX gateway or simulator is running");
-            pico_log!(error, "  and connected to the same network.");
-            pico_log!(info, "System halted. Reset device to retry.");
-            loop {
-                Timer::after(Duration::from_secs(30)).await;
-            }
+    let (knx_gateway_ip, knx_gateway_port) = if let Some(gateway) = knx_discovery::discover_gateway(&stack, Duration::from_secs(3)).await {
+        pico_log!(info, "✓ KNX Gateway discovered automatically!");
+        pico_log!(info, "  IP: {}.{}.{}.{}", gateway.ip[0], gateway.ip[1], gateway.ip[2], gateway.ip[3]);
+        pico_log!(info, "  Port: {}", gateway.port);
+        (gateway.ip, gateway.port)
+    } else {
+        pico_log!(error, "✗ No KNX gateway found on network!");
+        pico_log!(error, "  Ensure your KNX gateway or simulator is running");
+        pico_log!(error, "  and connected to the same network.");
+        pico_log!(info, "System halted. Reset device to retry.");
+        loop {
+            Timer::after(Duration::from_secs(30)).await;
         }
     };
 
@@ -234,19 +232,16 @@ async fn main(spawner: Spawner) {
     let mut client = KnxClient::builder()
         .gateway(knx_gateway_ip, knx_gateway_port)
         .device_address([1, 1, 1])  // Device address 1.1.1
-        .build_with_buffers(&stack, knx_buffers)
+        .build_with_buffers(stack, knx_buffers)
         .unwrap();
 
     // Connect to gateway
     pico_log!(info, "2. Testing CONNECT_REQUEST...");
-    match client.connect().await {
-        Ok(_) => pico_log!(info, "✓ Connected to KNX gateway!"),
-        Err(_) => {
-            pico_log!(error, "✗ Failed to connect to KNX gateway");
-            pico_log!(error, "Tests cannot continue without connection");
-            loop {
-                Timer::after(Duration::from_secs(10)).await;
-            }
+    if let Ok(()) = client.connect().await { pico_log!(info, "✓ Connected to KNX gateway!") } else {
+        pico_log!(error, "✗ Failed to connect to KNX gateway");
+        pico_log!(error, "Tests cannot continue without connection");
+        loop {
+            Timer::after(Duration::from_secs(10)).await;
         }
     }
 
@@ -261,7 +256,7 @@ async fn main(spawner: Spawner) {
     // The response would come as a GroupResponse event
     // Using knx_read! macro for concise syntax
     match knx_read!(client, 1/2/3).await {
-        Ok(_) => pico_log!(info, "✓ READ command sent (response would be received as event)"),
+        Ok(()) => pico_log!(info, "✓ READ command sent (response would be received as event)"),
         Err(_) => pico_log!(error, "✗ Failed to send READ command"),
     }
 
@@ -276,7 +271,7 @@ async fn main(spawner: Spawner) {
     pico_log!(info, "Sending WRITE: bool=true to 1/2/3");
     // Using knx_write! macro for concise syntax
     match knx_write!(client, 1/2/3, KnxValue::Bool(true)).await {
-        Ok(_) => {
+        Ok(()) => {
             pico_log!(info, "✓ WRITE command sent successfully (fire-and-forget)");
         }
         Err(_) => {
@@ -288,26 +283,23 @@ async fn main(spawner: Spawner) {
     Timer::after(Duration::from_secs(2)).await;
 
     pico_log!(info, "Sending WRITE: bool=false to 1/2/3");
-    match knx_write!(client, 1/2/3, KnxValue::Bool(false)).await {
-        Ok(_) => {
-            pico_log!(info, "✓ WRITE command sent successfully");
-        }
-        Err(_) => {
-            pico_log!(error, "✗ Failed to send WRITE command");
-            pico_log!(error, "Connection may be lost, attempting reconnection...");
+    if let Ok(()) = knx_write!(client, 1/2/3, KnxValue::Bool(false)).await {
+        pico_log!(info, "✓ WRITE command sent successfully");
+    } else {
+        pico_log!(error, "✗ Failed to send WRITE command");
+        pico_log!(error, "Connection may be lost, attempting reconnection...");
 
-            // Try to reconnect
-            match client.connect().await {
-                Ok(_) => {
-                    pico_log!(info, "✓ Reconnected to KNX gateway!");
-                    // Retry the command with macro
-                    if let Ok(_) = knx_write!(client, 1/2/3, KnxValue::Bool(false)).await {
-                        pico_log!(info, "✓ Command sent successfully after reconnection");
-                    }
+        // Try to reconnect
+        match client.connect().await {
+            Ok(()) => {
+                pico_log!(info, "✓ Reconnected to KNX gateway!");
+                // Retry the command with macro
+                if let Ok(()) = knx_write!(client, 1/2/3, KnxValue::Bool(false)).await {
+                    pico_log!(info, "✓ Command sent successfully after reconnection");
                 }
-                Err(_) => {
-                    pico_log!(error, "✗ Failed to reconnect");
-                }
+            }
+            Err(_) => {
+                pico_log!(error, "✗ Failed to reconnect");
             }
         }
     }
@@ -355,7 +347,7 @@ async fn main(spawner: Spawner) {
     // In a real scenario, this would be inside receive_event() when handling GroupRead events
     // Note: knx_respond! macro would be used here: knx_respond!(client, 1/2/10, KnxValue::Temperature(22.5))
     match client.respond(ga!(1/2/10), KnxValue::Temperature(22.5)).await {
-        Ok(_) => pico_log!(info, "✓ RESPOND sent: Temperature = 22.5°C to 1/2/10"),
+        Ok(()) => pico_log!(info, "✓ RESPOND sent: Temperature = 22.5°C to 1/2/10"),
         Err(_) => pico_log!(error, "✗ Failed to send RESPOND"),
     }
 
@@ -496,12 +488,12 @@ async fn blink_task(control: SharedControl) {
     loop {
         {
             let mut control = control.0.lock().await;
-            let _ = control.gpio_set(0, true).await;
+            let () = control.gpio_set(0, true).await;
         }
         ticker.next().await;
         {
             let mut control = control.0.lock().await;
-            let _ = control.gpio_set(0, false).await;
+            let () = control.gpio_set(0, false).await;
         }
         ticker.next().await;
     }

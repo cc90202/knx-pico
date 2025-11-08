@@ -3,28 +3,26 @@
 // Use super::configuration for compatibility with both main.rs and examples
 use super::configuration::CONFIG;
 
-/// Extracts the WiFi SSID from configuration.
+/// Extracts the `WiFi` SSID from configuration.
 ///
 /// # Returns
-/// * `&str` - WiFi network SSID
+/// * `&str` - `WiFi` network SSID
 pub fn get_ssid() -> &'static str {
     CONFIG
         .lines()
         .find(|line| line.starts_with("WIFI_NETWORK="))
-        .map(|line| &line["WIFI_NETWORK=".len()..])
-        .unwrap_or("YOUR_WIFI_SSID")
+        .map_or("YOUR_WIFI_SSID", |line| &line["WIFI_NETWORK=".len()..])
 }
 
-/// Extracts the WiFi password from configuration.
+/// Extracts the `WiFi` password from configuration.
 ///
 /// # Returns
-/// * `&str` - WiFi network password
+/// * `&str` - `WiFi` network password
 pub fn get_wifi_password() -> &'static str {
     CONFIG
         .lines()
         .find(|line| line.starts_with("WIFI_PASSWORD="))
-        .map(|line| &line["WIFI_PASSWORD=".len()..])
-        .unwrap_or("YOUR_WIFI_PASSWORD")
+        .map_or("YOUR_WIFI_PASSWORD", |line| &line["WIFI_PASSWORD=".len()..])
 }
 
 /// Extracts the KNX gateway IP address from configuration.
@@ -35,8 +33,7 @@ pub fn get_knx_gateway_ip() -> &'static str {
     CONFIG
         .lines()
         .find(|line| line.starts_with("KNX_GATEWAY_IP="))
-        .map(|line| &line["KNX_GATEWAY_IP=".len()..])
-        .unwrap_or("192.168.1.10")
+        .map_or("192.168.1.10", |line| &line["KNX_GATEWAY_IP=".len()..])
 }
 
 /// Parse IP address string "a.b.c.d" into `[u8; 4]` array.

@@ -51,7 +51,8 @@ fn test_tunnel_connection() {
     println!("✓ TunnelClient created");
 
     // Connect
-    let (client, connect_frame) = client.connect().expect("Failed to create CONNECT_REQUEST");
+    let client = client.connect().expect("Failed to create CONNECT_REQUEST");
+    let connect_frame = client.frame_data();
     println!("✓ CONNECT_REQUEST built ({} bytes)", connect_frame.len());
 
     // Send CONNECT_REQUEST
@@ -80,7 +81,8 @@ fn test_tunnel_send_cemi() {
 
     // Connect first
     let client = TunnelClient::new(SIMULATOR_IP, SIMULATOR_PORT);
-    let (client, connect_frame) = client.connect().unwrap();
+    let client = client.connect().unwrap();
+    let connect_frame = client.frame_data();
     socket.send_to(connect_frame, simulator_addr()).unwrap();
 
     let mut buffer = [0u8; 1024];
@@ -93,8 +95,8 @@ fn test_tunnel_send_cemi() {
     println!("✓ CEMI frame built ({} bytes)", cemi_frame.len());
 
     // Send CEMI
-    let tunneling_request = client.send_cemi(&cemi_frame).unwrap();
-    socket.send_to(&tunneling_request, simulator_addr()).unwrap();
+    let tunneling_request = client.send_tunneling_request(&cemi_frame).unwrap();
+    socket.send_to(tunneling_request, simulator_addr()).unwrap();
     println!("✓ TUNNELING_REQUEST sent");
 
     // Receive TUNNELING_ACK
@@ -115,7 +117,8 @@ fn test_tunnel_disconnect() {
 
     // Connect
     let client = TunnelClient::new(SIMULATOR_IP, SIMULATOR_PORT);
-    let (client, connect_frame) = client.connect().unwrap();
+    let client = client.connect().unwrap();
+    let connect_frame = client.frame_data();
     socket.send_to(connect_frame, simulator_addr()).unwrap();
 
     let mut buffer = [0u8; 1024];
@@ -124,10 +127,11 @@ fn test_tunnel_disconnect() {
     println!("✓ Connected");
 
     // Disconnect
-    let disconnect_frame = client.disconnect().unwrap();
+    let client = client.disconnect().unwrap();
+    let disconnect_frame = client.frame_data();
     println!("✓ DISCONNECT_REQUEST built ({} bytes)", disconnect_frame.len());
 
-    socket.send_to(&disconnect_frame, simulator_addr()).unwrap();
+    socket.send_to(disconnect_frame, simulator_addr()).unwrap();
     println!("✓ DISCONNECT_REQUEST sent");
 
     // Receive DISCONNECT_RESPONSE
@@ -141,12 +145,12 @@ fn test_group_address_creation() {
 
     // 3-level addressing
     let addr = GroupAddress::new(1, 2, 3).expect("Failed to create group address");
-    assert_eq!(addr.to_raw(), 0x0A03);
-    println!("✓ GroupAddress::new(1, 2, 3) -> 0x{:04X}", addr.to_raw());
+    assert_eq!(addr.raw(), 0x0A03);
+    println!("✓ GroupAddress::new(1, 2, 3) -> 0x{:04X}", addr.raw());
 
     // From raw
     let addr = GroupAddress::from(0x0A03);
-    assert_eq!(addr.to_raw(), 0x0A03);
+    assert_eq!(addr.raw(), 0x0A03);
     println!("✓ GroupAddress::from(0x0A03) OK");
 }
 
@@ -155,11 +159,11 @@ fn test_individual_address_creation() {
     println!("\n=== Test: Individual Address Creation ===");
 
     let addr = IndividualAddress::new(1, 1, 250).expect("Failed to create individual address");
-    assert_eq!(addr.to_raw(), 0x11FA);
-    println!("✓ IndividualAddress::new(1, 1, 250) -> 0x{:04X}", addr.to_raw());
+    assert_eq!(addr.raw(), 0x11FA);
+    println!("✓ IndividualAddress::new(1, 1, 250) -> 0x{:04X}", addr.raw());
 
     let addr = IndividualAddress::from(0x11FA);
-    assert_eq!(addr.to_raw(), 0x11FA);
+    assert_eq!(addr.raw(), 0x11FA);
     println!("✓ IndividualAddress::from(0x11FA) OK");
 }
 
