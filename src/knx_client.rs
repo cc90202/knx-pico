@@ -25,6 +25,7 @@ use embassy_net::udp::PacketMetadata;
 use heapless::index_map::FnvIndexMap;
 use crate::addressing::{GroupAddress, IndividualAddress};
 use crate::error::KnxError;
+use crate::net::embassy_adapter::EmbassyUdpTransport;
 use crate::protocol::async_tunnel::AsyncTunnelClient;
 use crate::protocol::cemi::{ControlField1, ControlField2};
 use crate::protocol::constants::CEMIMessageCode;
@@ -595,14 +596,14 @@ impl KnxClientBuilder {
     /// * `tx_meta` - Transmit packet metadata buffer (minimum 4 entries)
     /// * `rx_buffer` - Receive data buffer (recommended 2048 bytes)
     /// * `tx_buffer` - Transmit data buffer (recommended 2048 bytes)
-    pub fn build<'a>(
+    pub fn build<'a, D: embassy_net::driver::Driver>(
         self,
-        stack: &'a embassy_net::Stack<'static>,
+        stack: &'a embassy_net::Stack<D>,
         rx_meta: &'a mut [PacketMetadata],
         tx_meta: &'a mut [PacketMetadata],
         rx_buffer: &'a mut [u8],
         tx_buffer: &'a mut [u8],
-    ) -> Result<KnxClient<'a>> {
+    ) -> Result<KnxClient<'a, EmbassyUdpTransport<'a, 'a, D>>> {
         Ok(KnxClient::new_with_device(
             stack,
             rx_meta,
@@ -635,14 +636,15 @@ impl KnxClientBuilder {
 ///     .build_with_buffers(&stack, &mut buffers)?;
 /// ```
 #[derive(Debug)]
-pub struct KnxClient<'a> {
-    tunnel: AsyncTunnelClient<'a>,
+pub struct KnxClient<'a, T: crate::net::transport::AsyncTransport> {
+    tunnel: AsyncTunnelClient<T>,
     device_address: u16,
     /// DPT registry mapping group addresses to their datapoint types
     dpt_registry: FnvIndexMap<u16, DptType, MAX_DPT_REGISTRY_SIZE>,
+    _phantom: core::marker::PhantomData<&'a ()>,
 }
 
-impl<'a> KnxClient<'a> {
+impl<'a, D: embassy_net::driver::Driver> KnxClient<'a, EmbassyUdpTransport<'a, 'a, D>> {
     /// Creates a builder for configuring a new KNX client.
     ///
     /// This is the recommended way to create a [`KnxClient`].
@@ -666,7 +668,7 @@ impl<'a> KnxClient<'a> {
     ///
     /// Internal method used by the builder. Prefer using [`KnxClient::builder()`].
     fn new_with_device(
-        stack: &'a embassy_net::Stack<'static>,
+        stack: &'a embassy_net::Stack<D>,
         rx_meta: &'a mut [PacketMetadata],
         tx_meta: &'a mut [PacketMetadata],
         rx_buffer: &'a mut [u8],
@@ -675,20 +677,17 @@ impl<'a> KnxClient<'a> {
         gateway_port: u16,
         device_address: u16,
     ) -> Self {
-        let tunnel = AsyncTunnelClient::new(
-            stack,
-            rx_meta,
-            tx_meta,
-            rx_buffer,
-            tx_buffer,
-            gateway_ip,
-            gateway_port,
-        );
+        // Create the UDP transport adapter
+        let transport = EmbassyUdpTransport::new(stack, rx_meta, rx_buffer, tx_meta, tx_buffer);
+
+        // Create the tunnel client with the transport
+        let tunnel = AsyncTunnelClient::new(transport, gateway_ip, gateway_port);
 
         Self {
             tunnel,
             device_address,
             dpt_registry: FnvIndexMap::new(),
+            _phantom: core::marker::PhantomData,
         }
     }
 
@@ -710,7 +709,7 @@ impl<'a> KnxClient<'a> {
     ///
     /// New `KnxClient` instance ready to connect.
     pub fn new(
-        stack: &'a embassy_net::Stack<'static>,
+        stack: &'a embassy_net::Stack<D>,
         rx_meta: &'a mut [PacketMetadata],
         tx_meta: &'a mut [PacketMetadata],
         rx_buffer: &'a mut [u8],
@@ -729,7 +728,10 @@ impl<'a> KnxClient<'a> {
             DEVICE_ADDRESS_RAW,
         )
     }
+}
 
+// Generic impl block for all transport types
+impl<'a, T: crate::net::transport::AsyncTransport> KnxClient<'a, T> {
     /// Registers a datapoint type for a specific group address.
     ///
     /// This allows automatic type conversion when receiving events for this address.
