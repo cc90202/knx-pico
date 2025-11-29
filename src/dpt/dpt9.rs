@@ -6,14 +6,14 @@
 //! ## Format
 //!
 //! ```text
-//! Byte 0: MEEE EMMM
+//! Byte 0: SEEE EMMM
 //! Byte 1: MMMM MMMM
 //!
-//! M = Sign bit (0 = positive, 1 = negative)
-//! E = Exponent (4 bits, unsigned, bias 0)
-//! M = Mantissa (11 bits, signed two's complement)
+//! S = Sign bit (bit 15: 0 = positive, 1 = negative)
+//! E = Exponent (bits 14-11: 4 bits, unsigned, range 0-15)
+//! M = Mantissa (bits 10-0: 11 bits, unsigned magnitude)
 //!
-//! Value = (0.01 * M) * 2^E
+//! Value = (0.01 * M) * 2^E  (negated if S=1)
 //! ```
 //!
 //! ## Range
@@ -141,20 +141,23 @@ impl Dpt9 {
 
         let value_u16 = u16::from_be_bytes([bytes[0], bytes[1]]);
 
-        // Extract fields
+        // Extract fields: SEEE EMMM MMMM MMMM
+        // S = Sign bit (bit 15)
+        // E = Exponent (bits 14-11, unsigned)
+        // M = Mantissa (bits 10-0, two's complement when S=1)
+        let sign_bit = (value_u16 >> 15) & 0x01;
         let exponent = ((value_u16 >> 11) & 0x0F) as u8;
         let mantissa_raw = value_u16 & 0x07FF;
 
-        // Convert mantissa from 11-bit two's complement
-        let mantissa = if mantissa_raw & 0x0400 != 0 {
-            // Negative: extend sign bit
-            (mantissa_raw | 0xF800) as i16
+        // Apply sign to mantissa
+        // When sign=1, mantissa uses two's complement on 11 bits (subtract 2048)
+        let mantissa = if sign_bit == 1 {
+            (mantissa_raw as i16) - 2048
         } else {
             mantissa_raw as i16
         };
 
         // Calculate value = (0.01 * mantissa) * 2^exponent
-        // The sign is already included in the mantissa (two's complement)
         let value = (0.01 * f32::from(mantissa)) * (1u32 << exponent) as f32;
 
         Ok(value)
@@ -196,11 +199,16 @@ impl DptEncode<f32> for Dpt9 {
             (mantissa_f - 0.5) as i16
         };
 
-        // mantissa is 11-bit two's complement
-        let mantissa_u16 = mantissa as u16 & 0x07FF;
+        // Extract sign bit and encode mantissa
+        // When mantissa is negative, use two's complement on 11 bits (add 2048)
+        let (sign_bit, mantissa_bits) = if mantissa < 0 {
+            (1u16, ((mantissa + 2048) as u16) & 0x07FF)
+        } else {
+            (0u16, (mantissa as u16) & 0x07FF)
+        };
 
-        // Build the 16-bit value
-        let value_u16 = (u16::from(exponent) << 11) | mantissa_u16;
+        // Build the 16-bit value: SEEE EMMM MMMM MMMM
+        let value_u16 = (sign_bit << 15) | (u16::from(exponent) << 11) | mantissa_bits;
 
         let bytes = value_u16.to_be_bytes();
         buf[0] = bytes[0];
@@ -372,6 +380,42 @@ mod tests {
             // Allow some tolerance due to limited precision
             assert_float_eq(decoded, value, value.abs() * 0.01 + 0.1);
         }
+    }
+
+    #[test]
+    fn test_decode_real_knx_bus_value() {
+        // Real KNX bus value: 0x0C38 should decode to 21.6°C
+        // This was incorrectly decoded as -19.5°C before the fix
+        // Binary: 0000 1100 0011 1000
+        // Sign: 0, Exponent: 1, Mantissa: 1080
+        // Value = (1080 * 0.01) * 2^1 = 21.6
+        let value = Dpt9::Temperature.decode_from_bytes(&[0x0C, 0x38]).unwrap();
+        assert_float_eq(value, 21.6, 0.01);
+    }
+
+    #[test]
+    fn test_decode_official_knx_example() {
+        // Official KNX specification example: 0x0AF0 should decode to 15.04
+        // Binary: 0000 1010 1111 0000
+        // Sign: 0, Exponent: 1, Mantissa: 752
+        // Value = (752 * 0.01) * 2^1 = 15.04
+        let value = Dpt9::Temperature.decode_from_bytes(&[0x0A, 0xF0]).unwrap();
+        assert_float_eq(value, 15.04, 0.01);
+    }
+
+    #[test]
+    fn test_decode_negative_temperature() {
+        // Test negative value decoding with sign bit
+        // Encode -5.0°C and verify it decodes correctly
+        let mut buf = [0u8; 2];
+        let len = Dpt9::Temperature.encode(-5.0, &mut buf).unwrap();
+        assert_eq!(len, 2);
+
+        // Verify sign bit is set (bit 15 should be 1)
+        assert_eq!(buf[0] & 0x80, 0x80, "Sign bit should be set for negative values");
+
+        let decoded = Dpt9::Temperature.decode(&buf[..len]).unwrap();
+        assert_float_eq(decoded, -5.0, 0.01);
     }
 
     // =========================================================================
