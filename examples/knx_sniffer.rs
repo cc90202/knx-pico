@@ -40,7 +40,7 @@ use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
-use knx_pico::knx_client::{DptType, KnxBuffers, KnxClient, KnxValue};
+use knx_pico::knx_client::{format_group_address, DptType, KnxBuffers, KnxClient, KnxEvent, KnxValue};
 use knx_pico::knx_discovery;
 use panic_persist as _;
 use static_cell::StaticCell;
@@ -418,7 +418,7 @@ async fn main(spawner: Spawner) {
     // To enable passive sniffer mode, uncomment the code below, but be aware
     // that it may cause system crashes after prolonged operation.
     // ========================================================================
-
+/*
     pico_log!(
         warn,
         "Note: Passive sniffer mode is disabled to prevent crashes"
@@ -433,13 +433,25 @@ async fn main(spawner: Spawner) {
         Timer::after(Duration::from_secs(30)).await;
         pico_log!(info, "System alive (idle mode)");
     }
-
-    /* SNIFFER MODE - DISABLED DUE TO CRASHES
+*/
+    /* SNIFFER MODE - DISABLED DUE TO CRASHES */
 
     pico_log!(info, "Entering passive sniffer mode...");
     pico_log!(info, "Listening for KNX bus events (press Ctrl+C to stop)");
 
+    let mut last_heartbeat = embassy_time::Instant::now();
+    const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(50); // Send before 60s timeout
+
     loop {
+        // Send heartbeat every 50 seconds to keep connection alive
+        if last_heartbeat.elapsed() > HEARTBEAT_INTERVAL {
+            match client.send_heartbeat().await {
+                Ok(()) => pico_log!(info, "Heartbeat sent"),
+                Err(_) => pico_log!(error, "Heartbeat failed"),
+            }
+            last_heartbeat = embassy_time::Instant::now();
+        }
+
         match client.receive_event().await {
             Ok(Some(event)) => {
                 match event {
@@ -508,7 +520,7 @@ async fn main(spawner: Spawner) {
         // Delay to prevent stack overflow
         Timer::after(Duration::from_millis(100)).await;
     }
-    */
+    // */
 }
 
 // Include the same background tasks from main.rs
