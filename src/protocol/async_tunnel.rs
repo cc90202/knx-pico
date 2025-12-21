@@ -124,29 +124,6 @@ const FLUSH_TIMEOUT: Duration = Duration::from_millis(600);
 /// - Very busy installations: 50
 const MAX_FLUSH_PACKETS: usize = 20;
 
-/// Maximum number of TUNNELING_INDICATION messages to process while waiting for ACK
-///
-/// **Prevents timeout on busy bus and system crashes**
-///
-/// After sending a command, we wait for ACK. During this time, the gateway
-/// may send TUNNELING_INDICATION for other bus events. This limits how many
-/// we process before considering the command successful.
-///
-/// **IMPORTANT**: On embedded devices like Pico 2 W, high values can cause
-/// stack overflow and crashes. Value of 1 is safest for production:
-/// - First INDICATION = echo of our command (gateway confirmation)
-/// - Command is immediately considered successful after first INDICATION
-///
-/// Many KNX gateways don't send separate ACK, only echo the command as INDICATION.
-/// After receiving and ACKing the INDICATION, we consider the command successful.
-const MAX_ACK_WAIT_INDICATIONS: usize = 1;
-
-/// Maximum number of recv_from attempts to prevent system crash
-///
-/// Limits the total number of recv_from() calls to prevent stack overflow.
-/// On Pico 2 W, multiple recv_from() calls with timeouts can crash the system.
-const MAX_RECV_ATTEMPTS: usize = 2;
-
 /// Async wrapper for TunnelClient with pluggable transport
 ///
 /// # Type Parameters
@@ -192,24 +169,6 @@ impl<T: AsyncTransport> core::fmt::Debug for AsyncTunnelClient<T> {
 }
 
 impl<T: AsyncTransport> AsyncTunnelClient<T> {
-    /// Safe buffer copy with bounds checking
-    ///
-    /// Prevents buffer overflow panics by checking sizes before copying.
-    /// Returns error if source data is too large for destination buffer.
-    fn safe_buffer_copy(dest: &mut [u8], src: &[u8]) -> Result<usize> {
-        if src.len() > dest.len() {
-            pico_log!(
-                error,
-                "Buffer overflow prevented: src_len={} > dest_len={}",
-                src.len(),
-                dest.len()
-            );
-            return Err(KnxError::invalid_frame());
-        }
-        dest[..src.len()].copy_from_slice(src);
-        Ok(src.len())
-    }
-
     /// Create a new async tunnel client with the given transport
     ///
     /// # Arguments
@@ -566,9 +525,8 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
         })?;
 
         // Try to receive with timeout
-        // Note: 200ms timeout to allow for network latency and processing
         let result = with_timeout(
-            Duration::from_millis(200),
+            RESPONSE_TIMEOUT,
             self.transport.recv_from(&mut self.rx_buffer),
         )
         .await;
