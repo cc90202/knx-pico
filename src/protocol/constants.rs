@@ -258,13 +258,14 @@ impl CEMIMessageCode {
 // =============================================================================
 
 /// KNX message priority levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(u8)]
 pub enum Priority {
     /// System priority
     System = 0b00,
     /// Normal priority (default)
+    #[default]
     Normal = 0b01,
     /// Urgent priority
     Urgent = 0b10,
@@ -290,8 +291,3 @@ impl Priority {
     }
 }
 
-impl Default for Priority {
-    fn default() -> Self {
-        Self::Normal
-    }
-}

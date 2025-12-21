@@ -297,3 +297,5 @@ python3 knx_simulator.py
 - **Heartbeat required** - Call `send_heartbeat()` every 60s or connection drops
 - **Flush before send** - `AsyncTunnelClient` flushes pending packets before new commands
 - nelle commit non mettere mai riferimenti a anthropic e/o claude; fai commit sintetiche e senza icone
+- non committare mai le mie credenziali wifi
+- ricordati che questo progetto ha bisogno della versione rust nightly
