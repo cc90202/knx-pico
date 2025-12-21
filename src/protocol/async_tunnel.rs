@@ -53,10 +53,11 @@
 use crate::error::{KnxError, Result};
 use crate::net::transport::AsyncTransport;
 use crate::net::IpEndpoint;
-use crate::protocol::constants::ServiceType;
+use crate::protocol::constants::{ServiceType, MAX_CEMI_SIZE};
 use crate::protocol::frame::KnxnetIpFrame;
 use crate::protocol::tunnel::{Connected, TunnelClient};
 use embassy_time::{with_timeout, Duration};
+use heapless::{Deque, Vec as HVec};
 
 // Import unified logging macro from crate root
 use crate::pico_log;
@@ -124,6 +125,15 @@ const FLUSH_TIMEOUT: Duration = Duration::from_millis(600);
 /// - Very busy installations: 50
 const MAX_FLUSH_PACKETS: usize = 20;
 
+/// Maximum pending INDICATION messages in queue
+///
+/// When sending multiple commands in sequence, INDICATION responses are
+/// queued here during the flush loop. The queue uses a circular buffer
+/// strategy: if full, the oldest message is dropped.
+///
+/// Memory usage: MAX_PENDING_INDICATIONS * MAX_CEMI_SIZE = 10 * 64 = 640 bytes
+const MAX_PENDING_INDICATIONS: usize = 10;
+
 /// Async wrapper for TunnelClient with pluggable transport
 ///
 /// # Type Parameters
@@ -140,8 +150,9 @@ const MAX_FLUSH_PACKETS: usize = 20;
 ///
 /// # Note on Memory Usage
 ///
-/// This struct contains three 512-byte buffers (rx_buffer, cemi_buffer, pending_indication_buffer).
-/// Total memory: ~1.5KB for this struct + transport-specific buffers.
+/// This struct contains two 512-byte buffers (rx_buffer, cemi_buffer) plus a
+/// circular queue for pending INDICATION messages (640 bytes).
+/// Total memory: ~1.7KB for this struct + transport-specific buffers.
 pub struct AsyncTunnelClient<T: AsyncTransport> {
     /// Pluggable transport layer
     transport: T,
@@ -151,10 +162,8 @@ pub struct AsyncTunnelClient<T: AsyncTransport> {
     rx_buffer: [u8; MAX_PACKET_SIZE],
     /// Temporary buffer for cEMI data copying (to avoid lifetime issues)
     cemi_buffer: [u8; MAX_PACKET_SIZE],
-    /// Buffer for pending INDICATION received during send_cemi()
-    pending_indication_buffer: [u8; MAX_PACKET_SIZE],
-    /// Length of pending INDICATION (None if no pending data)
-    pending_indication_len: Option<usize>,
+    /// Circular queue for pending INDICATION messages received during send_cemi()
+    indication_queue: Deque<HVec<u8, MAX_CEMI_SIZE>, MAX_PENDING_INDICATIONS>,
     /// Internal tunnel client (when connected)
     client: Option<TunnelClient<Connected>>,
 }
@@ -202,8 +211,7 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
         Self {
             transport,
             gateway_endpoint: IpEndpoint::new(gateway_addr.into(), gateway_port),
-            pending_indication_buffer: [0u8; MAX_PACKET_SIZE],
-            pending_indication_len: None,
+            indication_queue: Deque::new(),
             rx_buffer: [0u8; MAX_PACKET_SIZE],
             cemi_buffer: [0u8; MAX_PACKET_SIZE],
             client: None,
@@ -437,9 +445,24 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
                                 if let Ok(ack_frame) = client.build_tunneling_ack(ack_seq, 0) {
                                     let _ = self.transport.send_to(ack_frame, gateway).await;
                                 }
+
+                                // Queue the INDICATION for later retrieval via receive()
+                                let mut vec = HVec::new();
+                                if vec.extend_from_slice(cemi_data).is_ok() {
+                                    if self.indication_queue.push_back(vec).is_err() {
+                                        // Queue full - drop oldest and retry
+                                        pico_log!(warn, "Indication queue full, dropping oldest");
+                                        self.indication_queue.pop_front();
+                                        let mut vec2 = HVec::new();
+                                        if vec2.extend_from_slice(cemi_data).is_ok() {
+                                            let _ = self.indication_queue.push_back(vec2);
+                                        }
+                                    }
+                                }
+
                                 pico_log!(
                                     debug,
-                                    "Flushed TUNNELING_INDICATION #{}, cemi_len={}",
+                                    "Queued TUNNELING_INDICATION #{}, cemi_len={}",
                                     flushed_count,
                                     cemi_data.len()
                                 );
@@ -502,20 +525,21 @@ impl<T: AsyncTransport> AsyncTunnelClient<T> {
     /// }
     /// ```
     pub async fn receive(&mut self) -> Result<Option<&[u8]>> {
-        // First, check if we have a pending INDICATION saved from send_cemi()
-        if let Some(len) = self.pending_indication_len.take() {
+        // First, check if we have queued INDICATION from send_cemi() flush loop
+        if let Some(cemi_vec) = self.indication_queue.pop_front() {
+            let len = cemi_vec.len();
             pico_log!(
                 debug,
-                "receive: returning pending INDICATION ({} bytes)",
+                "receive: returning queued INDICATION ({} bytes)",
                 len
             );
 
             // Copy to cemi_buffer and return
-            self.cemi_buffer[..len].copy_from_slice(&self.pending_indication_buffer[..len]);
+            self.cemi_buffer[..len].copy_from_slice(&cemi_vec);
             return Ok(Some(&self.cemi_buffer[..len]));
         }
 
-        // No pending INDICATION, try to receive new data
+        // No queued INDICATION, try to receive new data from socket
         // Get gateway endpoint before borrowing client
         let gateway = self.gateway_endpoint;
 
