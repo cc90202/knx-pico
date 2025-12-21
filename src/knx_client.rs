@@ -933,6 +933,22 @@ impl<T: crate::net::transport::AsyncTransport> KnxClient<'_, T> {
             .map_err(KnxClientError::from)
     }
 
+    /// Sends a heartbeat to keep the connection alive.
+    ///
+    /// KNX gateways close the connection if no heartbeat is received within 60 seconds.
+    /// Call this method every 50 seconds to ensure the connection stays open.
+    ///
+    /// # Errors
+    ///
+    /// - [`KnxClientError::NotConnected`] - Client not connected
+    /// - [`KnxClientError::SendFailed`] - Failed to send heartbeat
+    pub async fn send_heartbeat(&mut self) -> Result<()> {
+        self.tunnel
+            .send_heartbeat()
+            .await
+            .map_err(KnxClientError::from)
+    }
+
     /// Waits for and parses the next KNX bus event.
     ///
     /// Returns `Ok(None)` on timeout (no data available).
