@@ -35,7 +35,10 @@
       "WebFetch(domain:ivoryegg.co.uk)",
       "Bash(cargo flash-sniffer-usb-release)",
       "Bash(RUSTFLAGS=\"-W dead_code -W unused\" cargo check:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(cargo machete --help:*)",
+      "Bash(cargo install:*)",
+      "Bash(cargo machete:*)"
     ],
     "deny": [],
     "ask": []

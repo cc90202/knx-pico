@@ -32,7 +32,6 @@ defmt = { version = "1.0.1", optional = true }
 embassy-sync = { version = "0.7.2", features = ["defmt"], optional = true }
 embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"], optional = true }
 embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime"], optional = true }
-embassy-futures = { version = "0.1.1", optional = true }
 embassy-rp = { version = "0.8.0", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp235xa", "binary-info"], optional = true }
 embassy-net = { version = "0.7.1", features = ["defmt", "icmp", "tcp", "udp", "raw", "dhcpv4", "medium-ethernet", "dns"], optional = true }
 embassy-usb-logger = { version = "0.5.1", optional = true }
@@ -47,8 +46,6 @@ static_cell = { version = "2.1", optional = true }
 log = { version = "0.4", optional = true }
 critical-section = { version = "1.2.0", optional = true }
 
-# Serialization support (optional)
-serde = { version = "1.0.206", default-features = false, features = ["derive"], optional = true }
 
 [features]
 default = []
@@ -59,9 +56,6 @@ std = []
 # Enable defmt logging support
 defmt = ["dep:defmt", "heapless/defmt"]
 
-# Enable serde support
-serde = ["dep:serde", "heapless/serde"]
-
 # USB logger feature (alternative to defmt-rtt)
 usb-logger = ["dep:embassy-usb-logger", "dep:log"]
 
@@ -70,7 +64,6 @@ embassy-rp = [
     "dep:embassy-sync",
     "dep:embassy-executor",
     "dep:embassy-time",
-    "dep:embassy-futures",
     "dep:embassy-rp",
     "dep:embassy-net",
     "dep:cyw43",
@@ -91,7 +84,6 @@ embassy-rp-usb = [
     "dep:embassy-sync",
     "dep:embassy-executor",
     "dep:embassy-time",
-    "dep:embassy-futures",
     "dep:embassy-rp",
     "dep:embassy-net",
     "dep:cyw43",
@@ -190,9 +182,13 @@ cast_precision_loss = "allow"         # DPT conversion math requires precision t
 default-target = "x86_64-unknown-linux-gnu"
 targets = []
 # Only document the core library features
-features = ["defmt", "serde"]
+features = ["defmt"]
 # Don't build examples that require embedded hardware
 no-default-features = false
+
+# Ignore false positives from cargo-machete (transitive deps for embassy-rp)
+[package.metadata.cargo-machete]
+ignored = ["cortex-m-rt", "critical-section"]
 
 [package.metadata.embassy]
 build = [
